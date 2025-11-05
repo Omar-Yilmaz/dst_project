@@ -1,7 +1,7 @@
 """
-Enhanced Interactive DST Horner Plot Analyst
-Professional web application for Drill Stem Test analysis.
-This version is calibrated to replicate the exact published answers in the lecture notes.
+Interactive DST Horner Plot Analyst: Pure Regression Model
+This version strictly calculates the Horner slope (m) and Pi (Pi_calc) using linear regression
+on the chosen Middle Time Region (MTR) without any manual overrides.
 """
 
 import streamlit as st
@@ -14,8 +14,8 @@ import base64
 
 # Page configuration
 st.set_page_config(
-    page_title="DST Horner Analyst",
-    page_icon="🛢️",
+    page_title="DST Horner Analyst: Pure Math",
+    page_icon="🧪",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -43,9 +43,8 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-def perform_analysis(h, Qo, mu_o, Bo, rw, phi, Ct, pwf_final, tp, data_text, 
-                     override_m, manual_m, pi_formula):
-    """Enhanced analysis function with error handling and logic for matching lecture answers"""
+def perform_analysis(h, Qo, mu_o, Bo, rw, phi, Ct, pwf_final, tp, data_text):
+    """Calculates all parameters strictly using mathematical regression."""
     
     # Input validation
     if any(param <= 0 for param in [h, Qo, mu_o, Bo, rw, phi, Ct]):
@@ -61,7 +60,7 @@ def perform_analysis(h, Qo, mu_o, Bo, rw, phi, Ct, pwf_final, tp, data_text,
     st.session_state.figure = None
     st.session_state.dataframe = None
 
-    # Use the flow time used in the Skin/FE/ri formulas (65 min from lecture notes)
+    # Flow time used in Skin/FE/ri formulas (tp_hr)
     tp_hr = tp / 60.0  
 
     # Parse DST Data
@@ -87,16 +86,15 @@ def perform_analysis(h, Qo, mu_o, Bo, rw, phi, Ct, pwf_final, tp, data_text,
     delta_t = df['dt'].values
     pwsf = df['pwsf'].values
 
-    # Calculate Horner Time (using tp=60 min to match lecture's x-axis spacing)
-    # Note: We use 60 min for plot X-axis spacing, but 65 min for the Skin/FE formula (tp_hr)
+    # Calculate Horner Time for plotting (using the implied tp=60 min for consistency with lecture's X-axis spacing)
     horner_time_plot = (60.0 + delta_t) / delta_t
     log_horner_time = np.log10(horner_time_plot)
     
     df['horner_time'] = horner_time_plot
     df['log_horner_time'] = log_horner_time
 
-    # Perform Linear Regression with dynamic point selection
-    num_regression_points = st.session_state.num_reg_points # Get slider value
+    # Perform Linear Regression 
+    num_regression_points = st.session_state.num_reg_points 
     slice_index = max(0, len(df) - num_regression_points)
     fit_df = df.iloc[slice_index:].copy()
     
@@ -105,28 +103,20 @@ def perform_analysis(h, Qo, mu_o, Bo, rw, phi, Ct, pwf_final, tp, data_text,
         return None, None, None
 
     try:
-        # Calculate regression slope (for plotting reference)
+        # Calculate regression slope (m) and intercept (Pi)
         regression = linregress(fit_df['log_horner_time'].values, fit_df['pwsf'].values)
-        m_calc = abs(regression.slope)
-        intercept_calc = regression.intercept
+        m = abs(regression.slope)
+        pi = regression.intercept
         r_squared = regression.rvalue ** 2
     except Exception as e:
         st.error(f"Regression failed: {str(e)}")
         return None, None, None
 
-    # --- FINAL VALUE SELECTION ---
-    # Use override value (372.0) or calculated value (365.26)
-    m = manual_m if override_m else m_calc
-    
-    # Use pi_formula (1910.0) or calculated intercept
-    pi = pi_formula if pi_formula else intercept_calc
-    
-    # Calculate Reservoir Properties
+    # --- FINAL CALCULATIONS (Using Calculated m and Pi) ---
     try:
         k = (162.6 * (Qo * mu_o * Bo)) / (m * h)  # Permeability
         
-        # Skin Factor (S) - Uses pi_formula (1910) and tp_hr (65/60)
-        # Note: (pi - pwf_final) in the formula is (1910 - 350)
+        # Skin Factor (S) - Uses calculated Pi and user's tp (65 min)
         log_term = np.log10((k * tp_hr) / (phi * mu_o * Ct * (rw ** 2)))
         S = 1.151 * (((pi - pwf_final) / m) - log_term + 3.23) 
         
@@ -146,7 +136,6 @@ def perform_analysis(h, Qo, mu_o, Bo, rw, phi, Ct, pwf_final, tp, data_text,
     # Store results
     results = {
         'm_final': m,
-        'm_calc': m_calc,
         'pi_final': pi,
         'k': k,
         'S': S,
@@ -164,16 +153,16 @@ def perform_analysis(h, Qo, mu_o, Bo, rw, phi, Ct, pwf_final, tp, data_text,
     ax.scatter(fit_df['horner_time'], fit_df['pwsf'], color='red', s=100, 
                label=f'MTR Data (n={len(fit_df)})', zorder=6)
     
-    # Plotting the FINAL line based on the 'm' used for calculations (372 or calculated)
+    # Plotting the FINAL line based on the calculated 'm'
     x_line_log = np.array([0, np.max(log_horner_time)]) 
-    y_line_final = pi - m * x_line_log # y = pi - m*X (Horner plot, X=log(tp+dt/dt))
+    y_line_final = pi - m * x_line_log # y = pi - m*X 
     ax.plot(10 ** x_line_log, y_line_final, 'r--', 
-            label=f'Analysis Slope (m = {m:.2f} psi/cycle)', 
+            label=f'Regression Slope (m = {m:.2f} psi/cycle)', 
             zorder=4, linewidth=2)
     
     # Initial pressure line
     ax.axhline(pi, color='green', linestyle=':', 
-               label=f'Formula $P_i$ = {pi:.1f} psi', linewidth=2)
+               label=f'Calculated $P_i$ = {pi:.1f} psi', linewidth=2)
     
     # Plot formatting
     ax.set_xscale('log')
@@ -197,10 +186,10 @@ def get_table_download_link(df):
 
 # Main App
 def main():
-    st.markdown('<h1 class="main-header">Interactive DST Horner Plot Analyst 🛢️</h1>', 
+    st.markdown('<h1 class="main-header">Interactive DST Horner Plot Analyst 🧪</h1>', 
                 unsafe_allow_html=True)
     
-    st.markdown("A professional web application for Drill Stem Test (DST) analysis using the Horner method.")
+    st.markdown("A professional web application for Drill Stem Test (DST) analysis using the Horner method. This version calculates the slope strictly via **linear regression (the equation)**.")
 
     # --- Initialize session state ---
     if 'results' not in st.session_state:
@@ -210,7 +199,7 @@ def main():
     if 'dataframe' not in st.session_state:
         st.session_state.dataframe = None
     if 'num_reg_points' not in st.session_state:
-        st.session_state.num_reg_points = 4 # Default for 372 match
+        st.session_state.num_reg_points = 4 
 
     # Sidebar inputs
     with st.sidebar:
@@ -233,9 +222,9 @@ def main():
                 pwf_final = st.number_input("Final Flow P, Pwf (psi)", value=350.0, min_value=0.0, format="%.1f")
             
             st.subheader("DST Test Parameters")
-            # Note: tp=65 is used for the Skin/ri formulas in the lecture
+            # tp is the only flow time input, used for Skin/ri formulas
             tp = st.number_input("Total Flow Time, tp (min)", value=65.0, min_value=0.1, format="%.1f", 
-                                 help="Used in Skin/Ri formulas (65 min in lecture).")
+                                 help="Used in Skin/Ri formulas (65 min in lecture notes).")
             
             st.subheader("Pressure Buildup Data")
             default_data = """5, 965
@@ -256,33 +245,22 @@ def main():
             )
 
             # --- REGRESSION SETTINGS ---
-            st.subheader("Regression & Override Settings")
+            st.subheader("Regression Settings")
             st.session_state.num_reg_points = st.slider(
-                "Points for MTR Regression (Plot)", 
+                "Points for MTR Regression", 
                 min_value=3, 
-                max_value=9, # Max points in default data is 9
+                max_value=9, 
                 value=4, 
-                help="Number of points at the end of the dataset used for the least-squares fit. Use 4 to match the lecture's straight line."
+                help="Number of points at the end of the dataset used for the least-squares fit."
             )
-
-            # --- LECTURE OVERRIDES (For exact match) ---
-            override_m = st.checkbox("Override Slope m (Match Lecture m=372)", value=True, 
-                                     help="If checked, calculations use the manual slope value.")
-            manual_m = st.number_input("Manual Slope Value (m)", value=372.0, format="%.1f", disabled=not override_m,
-                                     help="The value (372) used by the instructor in the final formulas.")
             
-            pi_formula = st.number_input("Formula Initial Pressure, Pi", value=1910.0, format="%.1f",
-                                     help="The Pi value (1910 psi) used by the instructor in the Skin formula, regardless of extrapolation.")
-
-
             submitted = st.form_submit_button("🚀 Run Analysis")
 
     # Perform analysis when form is submitted
     if submitted:
         with st.spinner("Performing DST analysis..."):
             results, figure, dataframe = perform_analysis(
-                h, Qo, mu_o, Bo, rw, phi, Ct, pwf_final, tp, data_text,
-                override_m, manual_m, pi_formula
+                h, Qo, mu_o, Bo, rw, phi, Ct, pwf_final, tp, data_text
             )
             
             if results is not None:
@@ -292,7 +270,7 @@ def main():
                 st.success("Analysis completed successfully!")
 
     # Display results
-    tab1, tab2, tab3 = st.tabs(["📊 Results & Plot", "📝 Formulas (Theory Proof)", "📥 Data Table"])
+    tab1, tab2, tab3 = st.tabs(["📊 Results & Plot", "📝 Formulas (Theory)", "📥 Data Table"])
 
     with tab1:
         col1, col2 = st.columns([1, 1.2])
@@ -303,13 +281,13 @@ def main():
                 results = st.session_state.results
                 
                 st.markdown('<div class="result-box">', unsafe_allow_html=True)
-                st.markdown(f"**Calculated Slope $m$ (Plot Fit):** ${results['m_calc']:.2f}$ psi/cycle")
-                st.markdown(f"**Final Slope Used ($m$):** **${results['m_final']:.2f}$ psi/cycle** (Formula Input)")
-                st.metric("Formula Initial Pressure, pᵢ", f"{results['pi_final']:.1f} psi")
+                st.markdown(f"**Regression Slope $m$:** **${results['m_final']:.2f}$ psi/cycle**")
+                st.metric("Initial Reservoir Pressure, pᵢ", f"{results['pi_final']:.1f} psi")
                 st.metric("Formation Permeability, k", f"{results['k']:.2f} md")
                 st.metric("Skin Factor, S", f"{results['S']:.2f}")
                 st.metric("Flow Efficiency, FE", f"{results['FE']:.3f}")
                 st.metric("Radius of Investigation, rᵢ", f"{results['ri']:.1f} ft")
+                st.markdown(f"**$R^2$ of Fit:** {results['r_squared']:.4f}")
                 st.markdown('</div>', unsafe_allow_html=True)
                 
                 # Interpretation
@@ -339,27 +317,20 @@ def main():
                 st.info("The Horner plot will appear here after analysis")
 
     with tab2:
-        st.header("Theory Proof: Key Equations Used")
-        st.markdown(f"""
-        This section proves the exact equations used to match the published lecture answers, using: 
-        $m = {st.session_state.results['m_final']:.2f}$ psi/cycle and $p_i = {st.session_state.results['pi_final']:.1f}$ psi.
-        """)
+        st.header("Theoretical Basis: Equations Used")
         
-        st.subheader("1. Permeability ($k$) - (Lecture Step 7)")
-        st.markdown(f"$$k = 162.6 \\frac{{Q_o \\mu_o B_o}}{{h \\cdot m}} = 162.6 \\frac{{({Qo} \\cdot {mu_o} \\cdot {Bo})}}{{{h} \\cdot {st.session_state.results['m_final']:.1f}}} \\approx {st.session_state.results['k']:.2f} \\text{{ md}}$$")
+        st.subheader("1. Permeability ($k$)")
+        st.markdown(f"$$k = 162.6 \\frac{{Q_o \\mu_o B_o}}{{h \\cdot m}}$$")
         
-        st.subheader("2. Skin Factor ($S$) - (Lecture Step 8)")
-        st.markdown(f"Formula uses $t_p = {tp}$ min in the log term, $p_i = {pi_formula}$ psi, and $m = {st.session_state.results['m_final']:.1f}$ psi/cycle:")
+        st.subheader("2. Skin Factor ($S$)")
+        st.markdown("The formula uses the input $t_p$ value (converted to hours for the log term):")
         st.latex(f"""
         S = 1.151\\left[ \\frac{{P_i - P_{{wf}}}}{{m}} - \\log_{{10}}\\left(\\frac{{k \\cdot t_p}}{{ \\phi \\mu_o C_t r_{{w}}^{{2}} }}\\right) + 3.23 \\right]
         """)
+        
+        st.subheader("3. Flow Efficiency ($FE$)")
         st.latex(f"""
-        S \\approx 1.151\\left[ \\frac{{{pi_formula} - {pwf_final}}}{{{st.session_state.results['m_final']:.1f}}} - \\log_{{10}}\\left(\\frac{{{st.session_state.results['k']:.2f} \\cdot ({tp}/60)}}{{{phi} \\cdot {mu_o} \\cdot {Ct:.1e} \\cdot {rw}^2}}\\right) + 3.23 \\right] \\approx {st.session_state.results['S']:.2f}
-        """)
-
-        st.subheader("3. Flow Efficiency ($FE$) - (Lecture Step 10)")
-        st.latex(f"""
-        FE = \\frac{{(P_i - P_{{wf}}) - \\Delta P_{{skin}}}}{{(P_i - P_{{wf}})}} = 1 - \\frac{{\\Delta P_{{skin}}}}{{P_i - P_{{wf}}}} \\approx {st.session_state.results['FE']:.3f}
+        FE = \\frac{{(P_i - P_{{wf}}) - \\Delta P_{{skin}}}}{{(P_i - P_{{wf}})}}
         """)
 
     with tab3:
@@ -373,8 +344,7 @@ def main():
     # Footer
     st.markdown("---")
     st.markdown(
-        "**DST Horner Plot Analyst** • Built with Python 🐍 and Streamlit • "
-        "For professional petroleum engineering analysis"
+        "**DST Horner Plot Analyst** • Built with Python 🐍 and Streamlit"
     )
 
 if __name__ == "__main__":
