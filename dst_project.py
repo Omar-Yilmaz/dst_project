@@ -43,7 +43,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-def perform_analysis(h, Qo, mu_o, Bo, rw, phi, Ct, pwf_final, tp, data_text):
+def perform_analysis(h, Qo, mu_o, Bo, rw, phi, Ct, pwf_final, tp, data_text, num_regression_points):
     """Calculates all parameters strictly using mathematical regression."""
     
     # Input validation
@@ -94,7 +94,6 @@ def perform_analysis(h, Qo, mu_o, Bo, rw, phi, Ct, pwf_final, tp, data_text):
     df['log_horner_time'] = log_horner_time
 
     # Perform Linear Regression 
-    num_regression_points = st.session_state.num_reg_points 
     slice_index = max(0, len(df) - num_regression_points)
     fit_df = df.iloc[slice_index:].copy()
     
@@ -108,6 +107,17 @@ def perform_analysis(h, Qo, mu_o, Bo, rw, phi, Ct, pwf_final, tp, data_text):
         m = abs(regression.slope)
         pi = regression.intercept
         r_squared = regression.rvalue ** 2
+        
+        # Calculate regression line endpoints for plotting (y = pi - m*X)
+        # We need the intercept where log_horner_time = 0 (Horner Time = 1)
+        # And the point corresponding to the largest log(Horner Time) used in the fit
+        y_at_ht_1 = pi 
+        x_at_max_log = np.max(fit_df['log_horner_time'].values)
+        y_at_max_log = pi - m * x_at_max_log
+
+        # Store regression line data for plotting
+        regression_line_data = (y_at_ht_1, x_at_max_log, y_at_max_log)
+
     except Exception as e:
         st.error(f"Regression failed: {str(e)}")
         return None, None, None
@@ -142,7 +152,8 @@ def perform_analysis(h, Qo, mu_o, Bo, rw, phi, Ct, pwf_final, tp, data_text):
         'FE': FE,
         'ri': ri,
         'r_squared': r_squared,
-        'dP_skin': dP_skin
+        'dP_skin': dP_skin,
+        'regression_line_data': regression_line_data
     }
 
     # Create enhanced plot
@@ -154,10 +165,10 @@ def perform_analysis(h, Qo, mu_o, Bo, rw, phi, Ct, pwf_final, tp, data_text):
                label=f'MTR Data (n={len(fit_df)})', zorder=6)
     
     # Plotting the FINAL line based on the calculated 'm'
-    x_line_log = np.array([0, np.max(log_horner_time)]) 
-    y_line_final = pi - m * x_line_log # y = pi - m*X 
-    ax.plot(10 ** x_line_log, y_line_final, 'r--', 
-            label=f'Regression Slope (m = {m:.2f} psi/cycle)', 
+    y_at_ht_1, x_at_max_log, y_at_max_log = regression_line_data
+    
+    ax.plot([1, 10**x_at_max_log], [y_at_ht_1, y_at_max_log], 'r--', 
+            label=f'Regression Line (m = {m:.2f})', 
             zorder=4, linewidth=2)
     
     # Initial pressure line
@@ -198,6 +209,7 @@ def main():
         st.session_state.figure = None
     if 'dataframe' not in st.session_state:
         st.session_state.dataframe = None
+    # Initialize the slider value in session state
     if 'num_reg_points' not in st.session_state:
         st.session_state.num_reg_points = 4 
 
@@ -222,6 +234,7 @@ def main():
                 pwf_final = st.number_input("Final Flow P, Pwf (psi)", value=350.0, min_value=0.0, format="%.1f")
             
             st.subheader("DST Test Parameters")
+            
             # tp is the only flow time input, used for Skin/ri formulas
             tp = st.number_input("Total Flow Time, tp (min)", value=65.0, min_value=0.1, format="%.1f", 
                                  help="Used in Skin/Ri formulas (65 min in lecture notes).")
@@ -251,6 +264,7 @@ def main():
                 min_value=3, 
                 max_value=9, 
                 value=4, 
+                key='reg_points_slider', # Use a key to ensure proper state management
                 help="Number of points at the end of the dataset used for the least-squares fit."
             )
             
@@ -260,7 +274,7 @@ def main():
     if submitted:
         with st.spinner("Performing DST analysis..."):
             results, figure, dataframe = perform_analysis(
-                h, Qo, mu_o, Bo, rw, phi, Ct, pwf_final, tp, data_text
+                h, Qo, mu_o, Bo, rw, phi, Ct, pwf_final, tp, data_text, st.session_state.num_reg_points
             )
             
             if results is not None:
