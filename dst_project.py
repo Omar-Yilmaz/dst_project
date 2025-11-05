@@ -58,34 +58,34 @@ def perform_analysis(h, Qo, mu_o, Bo, rw, phi, Ct, pwf_final, tp, data_text, num
     Enhanced analysis function with better error handling.
     Returns: results (dict), figure (matplotlib), dataframe (pandas)
     """
-
+    
     # Input validation
     if any(param <= 0 for param in [h, Qo, mu_o, Bo, rw, phi, Ct, tp]):
         st.error("All parameters must be positive values.")
         return None, None, None
-
+    
     if len(data_text.strip()) == 0:
         st.error("Please enter DST data.")
         return None, None, None
-
+    
     tp_hr = tp / 60.0  # Convert flow time to hours
 
     # Parse DST Data with enhanced error handling
     try:
         data_io = io.StringIO(data_text)
         df = pd.read_csv(
-            data_io,
-            sep=r'[,\s]+',
-            engine='python',
-            header=None,
+            data_io,  
+            sep=r'[,\s]+',  
+            engine='python',  
+            header=None,  
             names=['dt', 'pwsf']
         )
         df = df.apply(pd.to_numeric, errors='coerce').dropna()
-
+        
         if len(df) < 3:
             st.error(f"Please enter at least 3 valid data points (you have {len(df)}).")
             return None, None, None
-
+            
     except Exception as e:
         st.error(f"Error parsing data: {str(e)}")
         return None, None, None
@@ -96,7 +96,7 @@ def perform_analysis(h, Qo, mu_o, Bo, rw, phi, Ct, pwf_final, tp, data_text, num
     # Calculate Horner Time
     horner_time = (tp + delta_t) / delta_t
     log_horner_time = np.log10(horner_time)
-
+    
     df['Horner_Time'] = horner_time
     df['Log_Horner_Time'] = log_horner_time
     df = df.round(3) # Round data for clean display
@@ -104,7 +104,7 @@ def perform_analysis(h, Qo, mu_o, Bo, rw, phi, Ct, pwf_final, tp, data_text, num
     # Perform Linear Regression with dynamic point selection
     slice_index = max(0, len(df) - num_regression_points)
     fit_df = df.iloc[slice_index:].copy()
-
+    
     if len(fit_df) < 2:
         st.error("Not enough data points for regression.")
         return None, None, None
@@ -144,23 +144,23 @@ def perform_analysis(h, Qo, mu_o, Bo, rw, phi, Ct, pwf_final, tp, data_text, num
 
     # Create enhanced plot
     fig, ax = plt.subplots(figsize=(10, 7))
-
+    
     # Main data
     ax.scatter(horner_time, pwsf, label='All DST Data Points', color='blue', zorder=5, alpha=0.7)
-    ax.scatter(fit_df['Horner_Time'], fit_df['pwsf'], color='red', s=100,
+    ax.scatter(fit_df['Horner_Time'], fit_df['pwsf'], color='red', s=100,  
                label=f'MTR Data (n={len(fit_df)})', zorder=6)
-
+    
     # Regression line
     x_line_log = np.linspace(0, np.max(log_horner_time), 100) # 0 = log(1)
     y_line = intercept + regression.slope * x_line_log
-    ax.plot(10 ** x_line_log, y_line, 'r--',
-            label=f'MTR Regression (m = {m:.2f} psi/cycle, R² = {r_squared:.3f})',
+    ax.plot(10 ** x_line_log, y_line, 'r--',  
+            label=f'MTR Regression (m = {m:.2f} psi/cycle, R² = {r_squared:.3f})',  
             zorder=4, linewidth=2)
-
+    
     # Initial pressure line
-    ax.axhline(pi, color='green', linestyle=':',
+    ax.axhline(pi, color='green', linestyle=':',  
                label=f'Extrapolated $p_i$ = {pi:.1f} psi', linewidth=2)
-
+    
     # Plot formatting
     ax.set_xscale('log')
     ax.invert_xaxis()
@@ -169,7 +169,7 @@ def perform_analysis(h, Qo, mu_o, Bo, rw, phi, Ct, pwf_final, tp, data_text, num
     ax.set_xlabel('Horner Time (tp + Δt) / Δt', fontsize=12)
     ax.set_ylabel('Shut-in Pressure (Pwsf), psi', fontsize=12)
     ax.legend(loc='best')
-
+    
     plt.tight_layout()
 
     return results, fig, df
@@ -183,9 +183,9 @@ def get_table_download_link(df):
 
 # Main App
 def main():
-    st.markdown('<h1 class="main-header">Interactive DST Horner Plot Analyst 🛢️</h1>',
+    st.markdown('<h1 class="main-header">Interactive DST Horner Plot Analyst 🛢️</h1>', 
                 unsafe_allow_html=True)
-
+    
     st.markdown("""
     A professional web application for Drill Stem Test (DST) analysis using the Horner method.
     This tool automates the calculation of key reservoir properties from pressure buildup data.
@@ -202,26 +202,26 @@ def main():
     # Sidebar inputs
     with st.sidebar:
         st.header("📊 1. Input Parameters")
-
+        
         with st.form(key='input_form'):
             st.subheader("Reservoir & Fluid Properties")
             col1, col2 = st.columns(2)
-
+            
             with col1:
                 h = st.number_input("Pay Thickness, h (ft)", value=10.0, min_value=0.1, format="%.2f")
                 Qo = st.number_input("Flow Rate, Qo (bbl/d)", value=135.0, min_value=0.1, format="%.2f")
                 mu_o = st.number_input("Viscosity, μo (cp)", value=1.5, min_value=0.1, format="%.2f")
                 Bo = st.number_input("FVF, Bo (RB/STB)", value=1.15, min_value=0.1, format="%.3f")
-
+                
             with col2:
                 rw = st.number_input("Wellbore Radius, rw (ft)", value=0.333, min_value=0.01, format="%.3f")
                 phi = st.number_input("Porosity, φ", value=0.10, min_value=0.01, max_value=0.5, format="%.3f")
                 Ct = st.number_input("Compressibility, Ct (psi⁻¹)", value=8.4e-6, format="%.2e")
                 pwf_final = st.number_input("Final Flow P, Pwf (psi)", value=350.0, min_value=0.0, format="%.1f")
-
+            
             st.subheader("DST Test Parameters")
             tp = st.number_input("Total Flow Time, tp (min)", value=65.0, min_value=0.1, format="%.1f")
-
+            
             st.subheader("Pressure Buildup Data")
             default_data = """5, 965
 10, 1215
@@ -232,23 +232,23 @@ def main():
 35, 1740
 40, 1753
 45, 1765"""
-
+            
             data_text = st.text_area(
                 "Shut-in Data (Δt [min], Pwsf [psi])",
                 value=default_data,
                 height=200,
                 help="Enter one 'time, pressure' pair per line. Example: '5, 965'"
             )
-
+            
             st.subheader("Regression Settings")
             num_regression_points = st.slider(
-                "Points for MTR Regression",
-                min_value=3,
-                max_value=10,
+                "Points for MTR Regression",  
+                min_value=3,  
+                max_value=10,  
                 value=5,
                 help="Select the number of final data points to use for the regression line."
             )
-
+            
             submitted = st.form_submit_button("🚀 Run Analysis")
 
     # Perform analysis when form is submitted
@@ -257,7 +257,7 @@ def main():
             results, figure, dataframe = perform_analysis(
                 h, Qo, mu_o, Bo, rw, phi, Ct, pwf_final, tp, data_text, num_regression_points
             )
-
+            
             if results is not None:
                 st.session_state.results = results
                 st.session_state.figure = figure
@@ -269,10 +269,10 @@ def main():
 
     with col1:
         st.header("📈 2. Analysis Results")
-
+        
         if st.session_state.results:
             results = st.session_state.results
-
+            
             st.markdown('<div class="result-box">', unsafe_allow_html=True)
             st.metric("Horner Slope 'm'", f"{results['m']:.2f} psi/cycle")
             st.metric("Initial Reservoir Pressure, pᵢ", f"{results['pi']:.1f} psi")
@@ -282,7 +282,7 @@ def main():
             st.metric("Radius of Investigation, rᵢ", f"{results['ri']:.1f} ft")
             st.metric("Regression R-squared", f"{results['r_squared']:.4f}")
             st.markdown('</div>', unsafe_allow_html=True)
-
+            
             # Interpretation
             st.subheader("📋 Engineering Interpretation")
             if results['S'] < -3:
@@ -295,9 +295,9 @@ def main():
                 skin_interpretation = "Damaged well"
             else:
                 skin_interpretation = "Severely damaged well"
-
+                
             st.write(f"**Skin Factor Interpretation:** {skin_interpretation}")
-
+            
             if results['FE'] > 1.0:
                 fe_interpretation = "Well is stimulated (excellent efficiency)"
             elif results['FE'] > 0.8:
@@ -306,9 +306,9 @@ def main():
                 fe_interpretation = "Moderate damage"
             else:
                 fe_interpretation = "Poor flow efficiency (high damage)"
-
+                
             st.write(f"**Flow Efficiency Interpretation:** {fe_interpretation}")
-
+            
         else:
             st.info("👈 Enter parameters and click 'Run Analysis' to see results")
 
@@ -322,12 +322,12 @@ def main():
             st.pyplot(st.session_state.figure)
         else:
             st.info("The plot will appear here after analysis")
-
+    
     with tabs[1]:
         st.subheader("Processed Data")
         if st.session_state.dataframe is not None:
             st.dataframe(st.session_state.dataframe)
-            st.markdown(get_table_download_link(st.session_state.dataframe),
+            st.markdown(get_table_download_link(st.session_state.dataframe), 
                         unsafe_allow_html=True)
         else:
             st.info("The data table will appear here after analysis")
@@ -335,27 +335,27 @@ def main():
     with tabs[2]:
         st.subheader("Key Formulas Used (from Lecture)")
         st.markdown("These are the core equations this analysis is based on:")
-
+        
         st.latex(r'''
         \text{1. Horner Time:} \quad \frac{t_p + \Delta t}{\Delta t}
         ''')
-
+        
         st.latex(r'''
         \text{2. Horner Line Equation:} \quad P_{ws} = p_i - m \log \left( \frac{t_p + \Delta t}{\Delta t} \right)
         ''')
-
+        
         st.latex(r'''
         \text{3. Permeability (k):} \quad k = \frac{162.6 \cdot Q_o \mu_o B_o}{m \cdot h}
         ''')
-
+        
         st.latex(r'''
         \text{4. Skin Factor (S):} \quad S = 1.151 \left[ \frac{p_i - p_{wf}}{m} - \log \left( \frac{k \cdot t_{p,hr}}{\phi \mu_o C_t r_w^2} \right) + 3.23 \right]
         ''')
-
+        
         st.latex(r'''
         \text{5. Flow Efficiency (FE):} \quad FE = \frac{p_i - p_{wf} - \Delta P_{skin}}{p_i - p_{wf}}
         ''')
-
+        
         st.latex(r'''
         \text{6. Radius of Investigation (r_i):} \quad r_i = \sqrt{\frac{k \cdot t_p}{5.76 \times 10^4 \cdot \phi \mu_o C_t}}
         ''')
