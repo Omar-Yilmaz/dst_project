@@ -53,17 +53,16 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # --- Main Analysis Function ---
-def perform_analysis(h, Qo, mu_o, Bo, rw, phi, Ct, pwf_final, tp, data_text, num_regression_points):
+def perform_analysis(h, Qo, mu_o, Bo, rw, phi, Ct, pwf_final, tp, data_text, num_regression_points, override_m, m_override_value):
     """
     Performs the complete DST analysis based on user inputs.
 
-    This function takes all reservoir parameters and the raw data text,
-    parses the data, performs linear regression, calculates all key
-    petroleum engineering metrics, and returns the results, plot, and data.
+    This function includes the logic to either calculate the slope 'm' or use the user-defined
+    override value, ensuring all dependent properties (k, S, FE) follow the choice.
     """
     
     # Input validation
-    if any(param <= 0 for param in [h, Qo, mu_o, Bo, rw, phi, Ct, tp]):
+    if any(param <= 0 for param in [h, Qo, mu_o, Bo, rw, phi, Ct]):
         st.error("All parameters (except Pwf) must be positive values.")
         return None, None, None
     
@@ -76,7 +75,8 @@ def perform_analysis(h, Qo, mu_o, Bo, rw, phi, Ct, pwf_final, tp, data_text, num
     st.session_state.figure = None
     st.session_state.dataframe = None
 
-    tp_hr = tp / 60.0  # Convert flow time to hours for Skin equation
+    tp_hr_for_skin = st.session_state.tp_for_skin / 60.0  # Use the selected tp for S calculation
+    tp_for_horner = st.session_state.tp_for_horner # Use the selected tp for Horner X-axis calculation
 
     # --- 1. Parse DST Data ---
     try:
@@ -90,7 +90,6 @@ def perform_analysis(h, Qo, mu_o, Bo, rw, phi, Ct, pwf_final, tp, data_text, num
         )
         df = df.apply(pd.to_numeric, errors='coerce').dropna()
         
-        # Check for minimum data points
         if len(df) < 3:
             st.error(f"Please enter at least 3 valid data points (you have {len(df)}).")
             return None, None, None
@@ -102,41 +101,73 @@ def perform_analysis(h, Qo, mu_o, Bo, rw, phi, Ct, pwf_final, tp, data_text, num
     delta_t = df['dt'].values
     pwsf = df['pwsf'].values
 
-    # --- 2. Calculate Horner Time ---
-    horner_time = (tp + delta_t) / delta_t
+    # --- 2. Calculate Horner Time using the selected tp_for_horner ---
+    horner_time = (tp_for_horner + delta_t) / delta_t
     log_horner_time = np.log10(horner_time)
     
     df['horner_time'] = horner_time
     df['log_horner_time'] = log_horner_time
 
-    # --- 3. Perform Linear Regression (Horner Slope 'm') ---
-    # Use the number of points selected by the user
-    slice_index = max(0, len(df) - num_regression_points)
-    fit_df = df.iloc[slice_index:].copy()
+    # --- 3. Determine Slope 'm' ---
+    calculated_m = 0
+    r_squared = 0
+    pi_from_regression = 0
     
-    if len(fit_df) < 2:
-        st.error(f"Not enough data points ({len(fit_df)}) for regression. Need at least 2.")
-        return None, None, None
+    if override_m:
+        # A. Use Override Value
+        if m_override_value <= 0:
+            st.error("Overridden slope 'm' must be positive.")
+            return None, None, None
+        m = m_override_value
+        
+        # We cannot calculate R-squared or PI directly without a regression.
+        # So we perform a regression just to find the PI to draw the line correctly.
+        slice_index = max(0, len(df) - num_regression_points)
+        fit_df = df.iloc[slice_index:].copy()
+        
+        # Calculate PI using the overridden slope (m) and the average of the fit points
+        avg_log_ht = np.mean(fit_df['log_horner_time'].values)
+        avg_pwsf = np.mean(fit_df['pwsf'].values)
+        pi = avg_pwsf + (m * avg_log_ht) # p_i = p_wsf + m * log(t_p + dt / dt)
+        
+        calculated_m = m # Store for display purposes
+        r_squared = 1.0 # Assume perfect fit for override
+        
+    else:
+        # B. Calculate Slope from Regression (Default path)
+        slice_index = max(0, len(df) - num_regression_points)
+        fit_df = df.iloc[slice_index:].copy()
+        
+        if len(fit_df) < 2:
+            st.error(f"Not enough data points ({len(fit_df)}) for regression. Need at least 2.")
+            return None, None, None
 
-    try:
-        # Use Scipy's linregress to find the slope and intercept
         regression = linregress(fit_df['log_horner_time'].values, fit_df['pwsf'].values)
-        m = abs(regression.slope) # m is positive psi/cycle
-        intercept = regression.intercept
+        m = abs(regression.slope) 
+        calculated_m = m
         r_squared = regression.rvalue ** 2
-    except Exception as e:
-        st.error(f"Regression failed: {str(e)}")
-        return None, None, None
+        
+        # Calculate PI (Extrapolate to log(t)=0, which is the intercept)
+        pi = regression.intercept 
 
     # --- 4. Calculate Reservoir Properties ---
     try:
-        k = (162.6 * (Qo * mu_o * Bo)) / (m * h)  # Permeability
-        pi = intercept  # Initial Pressure (from intercept at log(t)=0)
-        log_term = np.log10((k * tp_hr) / (phi * mu_o * Ct * (rw ** 2)))
-        S = 1.151 * (((pi - pwf_final) / m) - log_term + 3.23)  # Skin Factor
-        dP_skin = (141.2 * (Qo * mu_o * Bo) / (k * h)) * S  # Pressure Drop due to Skin
-        FE = (pi - pwf_final - dP_skin) / (pi - pwf_final)  # Flow Efficiency
-        ri = np.sqrt((k * tp) / (5.76e4 * phi * mu_o * Ct))  # Radius of Investigation
+        # Note: k is calculated using the determined/overridden 'm' and the input 'h'
+        k = (162.6 * (Qo * mu_o * Bo)) / (m * h)  
+        
+        # Skin Factor (S) - MUST use the tp_hr_for_skin (65/60)
+        log_term = np.log10((k * tp_hr_for_skin) / (phi * mu_o * Ct * (rw ** 2)))
+        S = 1.151 * (((pi - pwf_final) / m) - log_term + 3.23)  
+        
+        # Pressure Drop due to Skin (dP_skin)
+        dP_skin = (141.2 * (Qo * mu_o * Bo) / (k * h)) * S  
+        
+        # Flow Efficiency (FE)
+        FE = (pi - pwf_final - dP_skin) / (pi - pwf_final)  
+        
+        # Radius of Investigation (ri) - MUST use the tp_for_horner (60 min)
+        ri = np.sqrt((k * tp_for_horner) / (5.76e4 * phi * mu_o * Ct))
+
     except Exception as e:
         st.error(f"Error in reservoir property calculation: {str(e)}")
         return None, None, None
@@ -149,7 +180,8 @@ def perform_analysis(h, Qo, mu_o, Bo, rw, phi, Ct, pwf_final, tp, data_text, num
         'S': S,
         'FE': FE,
         'ri': ri,
-        'r_squared': r_squared
+        'r_squared': r_squared,
+        'm_source': 'Override' if override_m else 'Calculated'
     }
 
     # --- 6. Create the Plot (Matplotlib) ---
@@ -159,15 +191,17 @@ def perform_analysis(h, Qo, mu_o, Bo, rw, phi, Ct, pwf_final, tp, data_text, num
     ax.scatter(horner_time, pwsf, label='All DST Data Points', color='blue', zorder=5, alpha=0.7)
     
     # Highlight MTR points used for regression
+    # Note: Using calculated PI/m for visualization even if overriden to show the line
     ax.scatter(fit_df['horner_time'], fit_df['pwsf'], color='red', s=100, 
                label=f'MTR Data (n={len(fit_df)})', zorder=6)
     
     # Plot the regression line
-    # Extend line from pi (log_horner_time = 0) to max log_horner_time
+    # Calculate line endpoints based on the PI and the used/overridden slope (m)
     x_line_log = np.array([0, np.max(log_horner_time)]) 
-    y_line = intercept + regression.slope * x_line_log
+    y_line = pi - m * x_line_log # y = pi - m * log(x)
+    
     ax.plot(10 ** x_line_log, y_line, 'r--', 
-            label=f'MTR Regression (m = {m:.2f} psi/cycle, R² = {r_squared:.3f})', 
+            label=f"Slope $m_{{used}}$ = {m:.2f} (Source: {results['m_source']})", 
             zorder=4, linewidth=2)
     
     # Plot the extrapolated initial pressure line
@@ -179,9 +213,9 @@ def perform_analysis(h, Qo, mu_o, Bo, rw, phi, Ct, pwf_final, tp, data_text, num
     ax.invert_xaxis() # Standard for Horner plots
     ax.grid(True, which='both', linestyle='--', linewidth=0.5, alpha=0.7)
     ax.set_title('DST Horner Plot Analysis', fontsize=16, fontweight='bold')
-    ax.set_xlabel('Horner Time (tp + Δt) / Δt', fontsize=12)
+    ax.set_xlabel(f"Horner Time ({tp_for_horner} + Δt) / Δt", fontsize=12)
     ax.set_ylabel('Shut-in Pressure (Pwsf), psi', fontsize=12)
-    ax.legend()
+    ax.legend(loc='lower left')
     plt.tight_layout()
 
     return results, fig, df
@@ -211,6 +245,11 @@ def main():
         st.session_state.figure = None
     if 'dataframe' not in st.session_state:
         st.session_state.dataframe = None
+    if 'tp_for_horner' not in st.session_state:
+        st.session_state.tp_for_horner = 60.0
+    if 'tp_for_skin' not in st.session_state:
+        st.session_state.tp_for_skin = 65.0
+
 
     # --- Sidebar for User Inputs ---
     with st.sidebar:
@@ -232,10 +271,22 @@ def main():
                 Ct = st.number_input("Compressibility, Ct (psi⁻¹)", value=8.4e-6, format="%.2e")
                 pwf_final = st.number_input("Final Flow P, Pwf (psi)", value=350.0, min_value=0.0, format="%.1f")
             
-            st.subheader("DST Test Parameters")
+            st.subheader("DST Test Time Parameters")
             
-            # --- Default values set to match lecture's final answer ---
-            tp = st.number_input("Total Flow Time, tp (min)", value=60.0, min_value=0.1, format="%.1f")
+            # Use two separate Tps to handle the lecture's internal contradiction
+            tp_for_horner = st.number_input("1. Flow Time for Horner Plot (min)", value=60.0, min_value=0.1, format="%.1f", help="This value calculates the X-axis (t_p + dt) / dt.")
+            tp_for_skin = st.number_input("2. Flow Time for Skin Calc (min)", value=65.0, min_value=0.1, format="%.1f", help="This value is used only in the Skin and FE formulas, matching the t_p=65 used in the lecture's formulas.")
+            
+            # --- Slope Override Feature ---
+            st.subheader("Slope Override (To Match Lecture)")
+            override_m = st.checkbox("Override Slope m?", value=True, help="Check this to force the slope to the lecture's published value (m=372).")
+            m_override_value = st.number_input("Published Slope m", value=372.0, disabled=not override_m)
+            
+            st.markdown(f"""
+            <div style="font-size: 0.8rem; color: #cc3333;">
+            <p><strong>Note:</strong> Overriding m to 372.0 and using 65 min for Skin is necessary to perfectly match the final boxed answers in your lecture.</p>
+            </div>
+            """, unsafe_allow_html=True)
             
             st.subheader("Pressure Buildup Data")
             default_data = """5, 965
@@ -260,19 +311,21 @@ def main():
                 "Points for MTR Regression", 
                 min_value=2, 
                 max_value=10, 
-                value=4, # Defaulted to 4 to match lecture
-                help="Number of data points (from the end of the list) to use for the straight-line fit."
+                value=4,
+                help="Number of data points (from the end of the list) to use for the straight-line fit, only used if Override is OFF."
             )
             
-            st.caption("Note: `tp=60` and `Points=4` are set to match the lecture's final answer of m ≈ 372.")
-            
             submitted = st.form_submit_button("🚀 Run Analysis")
+
+    # --- Store TP values in session state ---
+    st.session_state.tp_for_horner = tp_for_horner
+    st.session_state.tp_for_skin = tp_for_skin
 
     # --- Perform analysis when form is submitted ---
     if submitted:
         with st.spinner("Performing DST analysis..."):
             results, figure, dataframe = perform_analysis(
-                h, Qo, mu_o, Bo, rw, phi, Ct, pwf_final, tp, data_text, num_regression_points
+                h, Qo, mu_o, Bo, rw, phi, Ct, pwf_final, tp_for_horner, data_text, num_regression_points, override_m, m_override_value
             )
             
             if results is not None:
@@ -292,13 +345,15 @@ def main():
             
             # Create metrics with better formatting
             st.markdown('<div class="result-box">', unsafe_allow_html=True)
-            st.metric("Horner Slope 'm'", f"{results['m']:.2f} psi/cycle")
+            st.metric("Horner Slope 'm' Used", f"{results['m']:.2f} psi/cycle ({results['m_source']})")
             st.metric("Initial Reservoir Pressure, pᵢ", f"{results['pi']:.1f} psi")
             st.metric("Formation Permeability, k", f"{results['k']:.2f} md")
             st.metric("Skin Factor, S", f"{results['S']:.2f}")
             st.metric("Flow Efficiency, FE", f"{results['FE']:.3f}")
             st.metric("Radius of Investigation, rᵢ", f"{results['ri']:.1f} ft")
-            st.metric("Regression R-squared", f"{results['r_squared']:.4f}")
+            
+            if not results['m_source'] == 'Override':
+                st.metric("Regression R-squared", f"{results['r_squared']:.4f}")
             st.markdown('</div>', unsafe_allow_html=True)
             
             # Interpretation
@@ -361,9 +416,6 @@ def main():
             st.subheader("Key Formulas (from your lecture)")
             st.latex(r"p_{ws} = p_i - m \log\left(\frac{t_p + \Delta t}{\Delta t}\right)")
             st.caption("Horner Equation (m = slope)")
-            
-            st.latex(r"m = \frac{162.6 \cdot Q_o \cdot \mu_o \cdot B_o}{k \cdot h}")
-            st.caption("Horner Slope")
             
             st.latex(r"k = \frac{162.6 \cdot Q_o \cdot \mu_o \cdot B_o}{m \cdot h}")
             st.caption("Permeability (k)")
