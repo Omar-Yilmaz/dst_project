@@ -358,7 +358,7 @@ def main():
                 st.info("The processed data table will appear here")
 
         with tab3:
-            st.subheader("Key Formulas (from your lecture)")
+            st.subheader("Key Formulas")
 
             st.latex(r"p_{ws} = p_i - m \log\left(\frac{t_p + \Delta t}{\Delta t}\right)")
             st.caption("Horner Equation (m = slope)")
@@ -390,3 +390,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
