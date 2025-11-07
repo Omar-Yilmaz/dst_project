@@ -1,5 +1,5 @@
 """
-Enhanced Interactive DST Horner Plot Analyst
+Enhanced Interactive DST Horner Plot Analyst (Auto MTR Detection)
 Professional web application for Drill Stem Test analysis
 """
 
@@ -24,12 +24,12 @@ st.markdown("""
 <style>
     .main-header {
         font-size: 2.5rem;
-        color: #1f77b4; /* Primary brand color */
+        color: #1f77b4;
         text-align: center;
         margin-bottom: 1rem;
     }
     .result-box {
-        background-color: #f0f2f6; /* Light gray background */
+        background-color: #f0f2f6;
         padding: 1rem;
         border-radius: 0.5rem;
         margin: 0.5rem 0;
@@ -52,29 +52,61 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+# --- Auto MTR detection function ---
+def find_best_mtr(df, min_points=3):
+    """
+    Automatically find the straight line segment in the Horner plot using max R² linear regression.
+    Returns:
+        best_fit_df: The data slice used for best regression.
+        regression: linregress result for best fit.
+        start_idx, end_idx: indices of the window in df.
+    """
+    best_r2 = -1
+    best_slice = None
+    best_regression = None
+
+    n = len(df)
+    for window in range(min_points, n + 1):  # window size
+        for start in range(n - window + 1):
+            end = start + window
+            fit_df = df.iloc[start:end]
+            try:
+                reg = linregress(fit_df['log_horner_time'].values, fit_df['pwsf'].values)
+            except Exception:
+                continue
+            r2 = reg.rvalue ** 2
+            if r2 > best_r2:
+                best_r2 = r2
+                best_slice = (start, end)
+                best_regression = reg
+    if best_slice is None:
+        return None, None, None, None
+    return df.iloc[best_slice[0]:best_slice[1]], best_regression, best_slice[0], best_slice[1]
+
 # --- Main Analysis Function ---
-def perform_analysis(h, Qo, mu_o, Bo, rw, phi, Ct, pwf_final, tp, data_text, num_regression_points):
+def perform_analysis(h, Qo, mu_o, Bo, rw, phi, Ct, pwf_final, tp, data_text, min_points_for_mtr=3):
     """
     Performs the complete DST analysis based on user inputs.
 
     This function takes all reservoir parameters and the raw data text,
-    parses the data, performs linear regression, calculates all key
+    parses the data, performs linear regression (auto MTR), calculates all key
     petroleum engineering metrics, and returns the results, plot, and data.
     """
 
     # Input validation
     if any(param <= 0 for param in [h, Qo, mu_o, Bo, rw, phi, Ct, tp]):
         st.error("All parameters (except Pwf) must be positive values.")
-        return None, None, None
+        return None, None, None, None, None
 
     if len(data_text.strip()) == 0:
         st.error("Please enter DST data into the text area.")
-        return None, None, None
+        return None, None, None, None, None
 
     # Clear previous results from session state
     st.session_state.results = None
     st.session_state.figure = None
     st.session_state.dataframe = None
+    st.session_state.mtr_info = None
 
     tp_hr = tp / 60.0  # Convert flow time to hours for Skin equation
 
@@ -83,21 +115,18 @@ def perform_analysis(h, Qo, mu_o, Bo, rw, phi, Ct, pwf_final, tp, data_text, num
         data_io = io.StringIO(data_text)
         df = pd.read_csv(
             data_io,
-            sep=r'[,\s]+',  # Allow comma or space as separator
+            sep=r'[,\s]+',
             engine='python',
             header=None,
             names=['dt', 'pwsf']
         )
         df = df.apply(pd.to_numeric, errors='coerce').dropna()
-
-        # Check for minimum data points
         if len(df) < 3:
             st.error(f"Please enter at least 3 valid data points (you have {len(df)}).")
-            return None, None, None
-
+            return None, None, None, None, None
     except Exception as e:
         st.error(f"Error parsing data: {str(e)}. Please check the format (e.g., '5, 965').")
-        return None, None, None
+        return None, None, None, None, None
 
     delta_t = df['dt'].values
     pwsf = df['pwsf'].values
@@ -109,39 +138,29 @@ def perform_analysis(h, Qo, mu_o, Bo, rw, phi, Ct, pwf_final, tp, data_text, num
     df['horner_time'] = horner_time
     df['log_horner_time'] = log_horner_time
 
-    # --- 3. Perform Linear Regression (Horner Slope 'm') ---
-    # Use the number of points selected by the user
-    slice_index = max(0, len(df) - num_regression_points)
-    fit_df = df.iloc[slice_index:].copy()
+    # --- 3. Auto-detect MTR, Perform Linear Regression ---
+    fit_df, regression, mtr_start, mtr_end = find_best_mtr(df, min_points=min_points_for_mtr)
+    if fit_df is None or len(fit_df) < 2:
+        st.error("Automatic straight-line detection failed (not enough linear points).")
+        return None, None, None, None, None
 
-    if len(fit_df) < 2:
-        st.error(f"Not enough data points ({len(fit_df)}) for regression. Need at least 2.")
-        return None, None, None
-
-    try:
-        # Use Scipy's linregress to find the slope and intercept
-        regression = linregress(fit_df['log_horner_time'].values, fit_df['pwsf'].values)
-        m = abs(regression.slope) # m is positive psi/cycle
-        intercept = regression.intercept
-        r_squared = regression.rvalue ** 2
-    except Exception as e:
-        st.error(f"Regression failed: {str(e)}")
-        return None, None, None
+    m = abs(regression.slope)  # m is positive psi/cycle
+    intercept = regression.intercept
+    r_squared = regression.rvalue ** 2
 
     # --- 4. Calculate Reservoir Properties ---
     try:
-        k = (162.6 * (Qo * mu_o * Bo)) / (m * h)  # Permeability
-        pi = intercept  # Initial Pressure (from intercept at log(t)=0)
+        k = (162.6 * (Qo * mu_o * Bo)) / (m * h)
+        pi = intercept
         log_term = np.log10((k * tp_hr) / (phi * mu_o * Ct * (rw ** 2)))
-        S = 1.151 * (((pi - pwf_final) / m) - log_term + 3.23)  # Skin Factor
-        dP_skin = (141.2 * (Qo * mu_o * Bo) / (k * h)) * S  # Pressure Drop due to Skin
-        FE = (pi - pwf_final - dP_skin) / (pi - pwf_final)  # Flow Efficiency
-        ri = np.sqrt((k * tp) / (5.76e4 * phi * mu_o * Ct))  # Radius of Investigation
+        S = 1.151 * (((pi - pwf_final) / m) - log_term + 3.23)
+        dP_skin = (141.2 * (Qo * mu_o * Bo) / (k * h)) * S
+        FE = (pi - pwf_final - dP_skin) / (pi - pwf_final)
+        ri = np.sqrt((k * tp) / (5.76e4 * phi * mu_o * Ct))
     except Exception as e:
         st.error(f"Error in reservoir property calculation: {str(e)}")
-        return None, None, None
+        return None, None, None, None, None
 
-    # --- 5. Store Results ---
     results = {
         'm': m,
         'pi': pi,
@@ -152,31 +171,32 @@ def perform_analysis(h, Qo, mu_o, Bo, rw, phi, Ct, pwf_final, tp, data_text, num
         'r_squared': r_squared
     }
 
-    # --- 6. Create the Plot (Matplotlib) ---
+    mtr_info = {
+        'num_points': len(fit_df),
+        'start_dt': float(fit_df['dt'].iloc[0]),
+        'end_dt': float(fit_df['dt'].iloc[-1]),
+        'used_rows': fit_df.index.tolist()
+    }
+
+    # --- 5. Create the Plot (Matplotlib) ---
     fig, ax = plt.subplots(figsize=(10, 7))
-
-    # Plot all data points
-    ax.scatter(horner_time, pwsf, label='All DST Data Points', color='blue', zorder=5, alpha=0.7)
-
-    # Highlight MTR points used for regression
+    # All data points
+    ax.scatter(horner_time, pwsf, label='All DST Data', color='blue', zorder=5, alpha=0.7)
+    # Highlight regression points
     ax.scatter(fit_df['horner_time'], fit_df['pwsf'], color='red', s=100,
-               label=f'MTR Data (n={len(fit_df)})', zorder=6)
-
-    # Plot the regression line
-    # Extend line from pi (log_horner_time = 0) to max log_horner_time
+               label=f'Auto MTR (n={len(fit_df)})', zorder=6)
+    # Regression line
     x_line_log = np.array([0, np.max(log_horner_time)])
     y_line = intercept + regression.slope * x_line_log
     ax.plot(10 ** x_line_log, y_line, 'r--',
             label=f'MTR Regression (m = {m:.2f} psi/cycle, R² = {r_squared:.3f})',
             zorder=4, linewidth=2)
-
-    # Plot the extrapolated initial pressure line
+    # Extrapolated initial pressure line
     ax.axhline(pi, color='green', linestyle=':',
                label=f'Extrapolated $p_i$ = {pi:.1f} psi', linewidth=2)
-
     # Plot formatting
     ax.set_xscale('log')
-    ax.invert_xaxis() # Standard for Horner plots
+    ax.invert_xaxis()
     ax.grid(True, which='both', linestyle='--', linewidth=0.5, alpha=0.7)
     ax.set_title('DST Horner Plot Analysis', fontsize=16, fontweight='bold')
     ax.set_xlabel('Horner Time (tp + Δt) / Δt', fontsize=12)
@@ -184,7 +204,7 @@ def perform_analysis(h, Qo, mu_o, Bo, rw, phi, Ct, pwf_final, tp, data_text, num
     ax.legend()
     plt.tight_layout()
 
-    return results, fig, df
+    return results, fig, df, fit_df, mtr_info
 
 def get_table_download_link(df):
     """Generate a link to download the processed data as CSV"""
@@ -201,7 +221,7 @@ def main():
     st.markdown("""
     A professional web application for Drill Stem Test (DST) analysis using the Horner method. 
     This tool automates the calculation of key reservoir properties from pressure buildup data,
-    based on the principles from your lecture notes.
+    now with **automatic straight-line region (MTR) detection** for regression.
     """)
 
     # --- Initialize session state ---
@@ -211,21 +231,20 @@ def main():
         st.session_state.figure = None
     if 'dataframe' not in st.session_state:
         st.session_state.dataframe = None
+    if 'mtr_info' not in st.session_state:
+        st.session_state.mtr_info = None
 
     # --- Sidebar for User Inputs ---
     with st.sidebar:
         st.header("📊 Input Parameters")
-
         with st.form(key='input_form'):
             st.subheader("Reservoir & Fluid Properties")
             col1, col2 = st.columns(2)
-
             with col1:
                 h = st.number_input("Pay Thickness, h (ft)", value=10.0, min_value=0.1, format="%.2f")
                 Qo = st.number_input("Flow Rate, Qo (bbl/d)", value=135.0, min_value=0.1, format="%.2f")
                 mu_o = st.number_input("Viscosity, μo (cp)", value=1.5, min_value=0.1, format="%.2f")
                 Bo = st.number_input("FVF, Bo (RB/STB)", value=1.15, min_value=0.1, format="%.3f")
-
             with col2:
                 rw = st.number_input("Wellbore Radius, rw (ft)", value=0.333, min_value=0.01, format="%.3f")
                 phi = st.number_input("Porosity, φ", value=0.10, min_value=0.01, max_value=0.5, format="%.3f")
@@ -233,8 +252,6 @@ def main():
                 pwf_final = st.number_input("Final Flow P, Pwf (psi)", value=350.0, min_value=0.0, format="%.1f")
 
             st.subheader("DST Test Parameters")
-
-            # --- Default values set to match lecture's final answer ---
             tp = st.number_input("Total Flow Time, tp (min)", value=60.0, min_value=0.1, format="%.1f")
 
             st.subheader("Pressure Buildup Data")
@@ -247,7 +264,6 @@ def main():
 35, 1740
 40, 1753
 45, 1765"""
-
             data_text = st.text_area(
                 "Shut-in Data (Δt [min], Pwsf [psi])",
                 value=default_data,
@@ -256,41 +272,42 @@ def main():
             )
 
             st.subheader("Regression Settings")
-            num_regression_points = st.slider(
-                "Points for MTR Regression",
-                min_value=2,
-                max_value=10,
-                value=4, # Defaulted to 4 to match lecture
-                help="Number of data points (from the end of the list) to use for the straight-line fit."
+            st.caption("Automatic straight-line (MTR) detection is now used for regression.")
+            min_points_for_mtr = st.slider(
+                "Minimum points for automatic line detection",
+                min_value=3,
+                max_value=max(3, len(default_data.strip().split('\n'))),
+                value=3,
+                help="Minimum number of contiguous points required for a segment to be evaluated as a straight line."
             )
-
-            st.caption("Note: `tp=60` and `Points=4` are set to match the lecture's final answer of m ≈ 372.")
 
             submitted = st.form_submit_button("🚀 Run Analysis")
 
     # --- Perform analysis when form is submitted ---
     if submitted:
         with st.spinner("Performing DST analysis..."):
-            results, figure, dataframe = perform_analysis(
-                h, Qo, mu_o, Bo, rw, phi, Ct, pwf_final, tp, data_text, num_regression_points
+            results, figure, dataframe, fit_df, mtr_info = perform_analysis(
+                h, Qo, mu_o, Bo, rw, phi, Ct, pwf_final, tp, data_text, min_points_for_mtr
             )
-
             if results is not None:
                 st.session_state.results = results
                 st.session_state.figure = figure
                 st.session_state.dataframe = dataframe
+                st.session_state.mtr_info = mtr_info
+                st.session_state.fit_df = fit_df
                 st.success("Analysis completed successfully!")
 
     # --- Main panel with results and plots ---
-    col1, col2 = st.columns([1, 1.2]) # Create two columns for results and plot tabs
+    col1, col2 = st.columns([1, 1.2])
 
     with col1:
         st.header("📈 Analysis Results")
 
         if st.session_state.results:
             results = st.session_state.results
+            mtr_info = st.session_state.mtr_info
 
-            # Create metrics with better formatting
+            # Metrics
             st.markdown('<div class="result-box">', unsafe_allow_html=True)
             st.metric("Horner Slope 'm'", f"{results['m']:.2f} psi/cycle")
             st.metric("Initial Reservoir Pressure, pᵢ", f"{results['pi']:.1f} psi")
@@ -313,7 +330,6 @@ def main():
                 skin_interpretation = "Damaged well"
             else:
                 skin_interpretation = "Severely damaged well"
-
             st.write(f"**Skin Factor Interpretation:** {skin_interpretation}")
 
             if results['FE'] > 1.0:
@@ -324,64 +340,60 @@ def main():
                 fe_interpretation = "Moderate damage"
             else:
                 fe_interpretation = "Poor flow efficiency"
-
             st.write(f"**Flow Efficiency:** {fe_interpretation}")
+
+            # MTR Info
+            if mtr_info:
+                st.info(f"**Regression used {mtr_info['num_points']} points** "
+                        f"(Δt: {mtr_info['start_dt']} to {mtr_info['end_dt']} min) "
+                        f"automatically detected as the straight line region (MTR).")
 
         else:
             st.info("👈 Enter parameters and click 'Run Analysis' to see results")
 
     with col2:
         st.header("Analysis Outputs")
-
-        # Create tabs for Plot, Data, and Formulas
         tab1, tab2, tab3 = st.tabs(["📊 Horner Plot", "📥 Data Table", "🧪 Formulas"])
-
         with tab1:
             if st.session_state.figure:
                 st.pyplot(st.session_state.figure)
+                # Highlight the used region in table (extra)
+                if 'fit_df' in st.session_state and st.session_state.fit_df is not None:
+                    st.caption("Auto MTR points are highlighted in red on the plot.")
             else:
                 st.info("The Horner plot will appear here after analysis")
-
         with tab2:
             if st.session_state.dataframe is not None:
                 st.subheader("Processed Data")
-                st.dataframe(st.session_state.dataframe.style.format({
+                df = st.session_state.dataframe.copy()
+                mtr_rows = st.session_state.mtr_info['used_rows'] if st.session_state.mtr_info else []
+                # Add MTR marker
+                df['MTR'] = ["✅" if i in mtr_rows else "" for i in df.index]
+                st.dataframe(df.style.format({
                     'dt': '{:.0f}',
                     'pwsf': '{:.1f}',
                     'horner_time': '{:.2f}',
                     'log_horner_time': '{:.3f}'
                 }))
                 st.markdown("---")
-                st.markdown(get_table_download_link(st.session_state.dataframe),
-                            unsafe_allow_html=True)
+                st.markdown(get_table_download_link(df), unsafe_allow_html=True)
             else:
                 st.info("The processed data table will appear here")
-
         with tab3:
             st.subheader("Key Formulas")
-
             st.latex(r"p_{ws} = p_i - m \log\left(\frac{t_p + \Delta t}{\Delta t}\right)")
             st.caption("Horner Equation (m = slope)")
-
-            # --- THIS IS THE MODIFIED SECTION ---
-            st.latex(r"m = \frac{162.6 \cdot Q_o \cdot \mu_o \cdot B_o}{k \cdot h}")
-            st.caption("Horner Slope (from Permeability)")
-
-            # --- THIS IS THE NEWLY ADDED EQUATION ---
             st.latex(r"m = \frac{P_{ws_1} - P_{ws_{10}}}{\log(10) - \log(1)}")
-            st.caption("Horner Slope (Manual Plot Reading, per your image)")
-            # --- END OF MODIFICATION ---
-
+            st.caption("Horner Slope (Manual Plot Reading)")
+            st.latex(r"m = \frac{\Delta P}{\Delta \log(\text{Horner Time})} \quad \text{(Linear Regression)}")
+            st.caption("Horner Slope (Automated in this App)")
             st.latex(r"k = \frac{162.6 \cdot Q_o \cdot \mu_o \cdot B_o}{m \cdot h}")
             st.caption("Permeability (k)")
-
             st.latex(r"S = 1.151 \left[ \left(\frac{p_i - p_{wf}}{m}\right) - \log\left(\frac{k \cdot t_{p(hr)}}{\phi \cdot \mu_o \cdot C_t \cdot r_w^2}\right) + 3.23 \right]")
             st.caption("Skin Factor (S)")
-
             st.latex(r"FE = \frac{p_i - p_{wf} - \Delta p_{skin}}{p_i - p_{wf}}")
             st.caption("Flow Efficiency (FE)")
 
-    # Footer
     st.markdown("---")
     st.markdown(
         "**DST Horner Plot Analyst** • Built with Python 🐍 and Streamlit • "
@@ -390,4 +402,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
