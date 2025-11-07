@@ -53,7 +53,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # --- NEW "SMART" Auto MTR detection function ---
-def find_best_mtr(df, min_points=3, slope_stability_threshold=0.15):
+def find_best_mtr(df, min_points=3, slope_stability_threshold=0.20): # <-- CHANGED to 0.20 as requested
     """
     Automatically find the *final* straight line segment (MTR)
     by finding the most stable, high-R-squared line from the *end* of the dataset.
@@ -235,28 +235,40 @@ def perform_analysis(h, Qo, mu_o, Bo, rw, phi, Ct, pwf_final, tp, data_text):
 
     # --- 5. Create the Plot (Matplotlib) ---
     fig, ax = plt.subplots(figsize=(10, 7))
-    # All data points
-    ax.scatter(horner_time, pwsf, label='All DST Data', color='blue', zorder=5, alpha=0.7)
-    # Highlight regression points
-    ax.scatter(fit_df['horner_time'], fit_df['pwsf'], color='red', s=100,
-               label=f"Auto-Detected MTR (n={len(fit_df)})", zorder=6)
-    # Regression line
-    x_line_log = np.array([0, np.max(log_horner_time)])
-    y_line = intercept + regression.slope * x_line_log
-    ax.plot(10 ** x_line_log, y_line, 'r--',
-            label=f'MTR Regression (m = {m:.2f} psi/cycle, R² = {r_squared:.3f})',
-            zorder=4, linewidth=2)
-    # Extrapolated initial pressure line
-    ax.axhline(pi, color='green', linestyle=':',
-               label=f'Extrapolated $p_i$ = {pi:.1f} psi', linewidth=2)
-    # Plot formatting
+
+    # --- Plot Customizations to Match Image ---
+    
+    # 1. Plot all data points as blue circles
+    ax.scatter(horner_time, pwsf, color='blue', zorder=5)
+
+    # 2. Set X-axis to match log paper (100 to 1)
     ax.set_xscale('log')
     ax.invert_xaxis()
-    ax.grid(True, which='both', linestyle='--', linewidth=0.5, alpha=0.7)
-    ax.set_title('DST Horner Plot Analysis (Auto-Fit MTR)', fontsize=16, fontweight='bold')
+    ax.set_xlim(100, 1) # Force range from 100 down to 1
+
+    # 3. Calculate and plot the solid black regression line
+    # We extend it from log(1)=0 to log(100)=2
+    x_line_log = np.array([0, 2]) # Corresponds to Horner Time 1 and 100
+    y_line = intercept + regression.slope * x_line_log
+    ax.plot(10 ** x_line_log, y_line, 'k-', # 'k-' is a solid black line
+            zorder=4, linewidth=1.5)
+
+    # 4. Set Y-axis to start at 0 and have correct ticks
+    # Set top limit to 5% above the highest of pi or the max pressure
+    top_limit = max(pi * 1.05, np.max(pwsf) * 1.05)
+    ax.set_ylim(bottom=0, top=top_limit)
+    ax.yaxis.set_major_locator(plt.MultipleLocator(100)) # Major ticks every 100
+    ax.yaxis.set_minor_locator(plt.MultipleLocator(20))  # Minor ticks every 20
+
+    # 5. Add major and minor gridlines (like graph paper)
+    ax.grid(which='major', linestyle='-', linewidth='0.6', color='#B0B0B0') # Darker/thicker major grid
+    ax.grid(which='minor', linestyle='-', linewidth='0.3', color='#D0D0D0') # Lighter/thinner minor grid
+    ax.set_axisbelow(True) # Ensure grid is behind data
+
+    # 6. Set labels (no title or legend)
     ax.set_xlabel('Horner Time (tp + Δt) / Δt', fontsize=12)
     ax.set_ylabel('Shut-in Pressure (Pwsf), psi', fontsize=12)
-    ax.legend()
+    
     plt.tight_layout()
 
     return results, fig, df, mtr_info
@@ -326,7 +338,7 @@ def main():
                 height=200,
                 help="Enter one 'time, pressure' pair per line. Example: '5, 965'"
             )
-
+            
             # --- REMOVED SLIDER FOR REGRESSION SETTINGS ---
             # The app is now fully automatic.
 
