@@ -5,6 +5,7 @@ Professional web application for Drill Stem Test analysis
 
 import streamlit as st
 import matplotlib.pyplot as plt
+import matplotlib.ticker as ticker
 import numpy as np
 from scipy.stats import linregress
 import pandas as pd
@@ -13,7 +14,7 @@ import base64
 
 # --- Page configuration ---
 st.set_page_config(
-    page_title="DST Horner Analyst (Smart-Fit)",
+    page_title="DST Horner Analyst",
     page_icon="📈",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -234,41 +235,85 @@ def perform_analysis(h, Qo, mu_o, Bo, rw, phi, Ct, pwf_final, tp, data_text):
 
 
     # --- 5. Create the Plot (Matplotlib) ---
+    # Use a professional 'seaborn' style for a cleaner look
+    # *** CHANGED: Switched from 'darkgrid' to 'whitegrid' for a cleaner, more obvious look ***
+    plt.style.use('seaborn-v0_8-whitegrid')
     fig, ax = plt.subplots(figsize=(10, 7))
 
-    # --- Plot Customizations to Match Image ---
-    
-    # 1. Plot all data points as blue circles
-    ax.scatter(horner_time, pwsf, color='blue', zorder=5)
+    # --- Plot Customizations for Professional Look ---
 
-    # 2. Set X-axis to match log paper (100 to 1)
+    # 1. Plot all data points as blue circles with a black edge
+    ax.scatter(horner_time, pwsf,
+               s=50,                  # Set size
+               color='C0',            # 'C0' is the default seaborn blue
+               edgecolor='black',     # Add a black outline
+               # *** NEW: Add a subtle line width to the edge ***
+               linewidths=0.5,
+               label='All DST Data',  # Add label for legend
+               zorder=5)              # Ensure points are on top of grid
+
+    # *** NEW: Plot MTR points in a different color (red) on top ***
+    ax.scatter(fit_df['horner_time'], fit_df['pwsf'],
+               # *** CHANGED: Made MTR points slightly larger ***
+               s=70,
+               color='C3',            # 'C3' is seaborn red
+               edgecolor='black',     # Add a black outline
+               # *** NEW: Add a bolder line width to MTR points ***
+               linewidths=1.0,
+               label=f"Auto-Detected MTR (n={mtr_info['num_points']})", # Add MTR label
+               zorder=6)              # Ensure these are on top
+
+    # 2. Set X-axis to match log paper
     ax.set_xscale('log')
     ax.invert_xaxis()
-    ax.set_xlim(100, 1) # Force range from 100 down to 1
+    # *** CHANGED: Force x-axis to go all the way to 1 ***
+    ax.set_xlim(left=np.max(horner_time) * 1.5, right=1.0) # End at Horner Time = 1
 
     # 3. Calculate and plot the solid black regression line
-    # We extend it from log(1)=0 to log(100)=2
-    x_line_log = np.array([0, 2]) # Corresponds to Horner Time 1 and 100
+    # *** CHANGED: We extend it from the max horner time to 1 (log(1)=0) ***
+    x_line_log = np.array([np.log10(np.max(horner_time) * 1.5), 0]) # End at log(1) = 0
     y_line = intercept + regression.slope * x_line_log
     ax.plot(10 ** x_line_log, y_line, 'k-', # 'k-' is a solid black line
-            zorder=4, linewidth=1.5)
+            label=f'MTR (m = {m:.2f}, R² = {r_squared:.3f})',
+            zorder=4,
+            # *** CHANGED: Made MTR line bolder ***
+            linewidth=2.5)
 
-    # 4. Set Y-axis to start at 0 and have correct ticks
-    # Set top limit to 5% above the highest of pi or the max pressure
+    # 4. Add the extrapolated pressure (pi) line back
+    ax.axhline(pi, color='green', linestyle='--',
+               label=f'Extrapolated $p_i$ = {pi:.1f} psi',
+               # *** CHANGED: Made pi line bolder ***
+               linewidth=2.5)
+
+    # 5. Set Y-axis to start at 0 and have correct ticks
     top_limit = max(pi * 1.05, np.max(pwsf) * 1.05)
     ax.set_ylim(bottom=0, top=top_limit)
-    ax.yaxis.set_major_locator(plt.MultipleLocator(100)) # Major ticks every 100
-    ax.yaxis.set_minor_locator(plt.MultipleLocator(20))  # Minor ticks every 20
+    ax.yaxis.set_major_locator(ticker.MultipleLocator(100)) # Major ticks every 100
+    ax.yaxis.set_minor_locator(ticker.MultipleLocator(20))  # Minor ticks every 20
 
-    # 5. Add major and minor gridlines (like graph paper)
-    ax.grid(which='major', linestyle='-', linewidth='0.6', color='#B0B0B0') # Darker/thicker major grid
-    ax.grid(which='minor', linestyle='-', linewidth='0.3', color='#D0D0D0') # Lighter/thinner minor grid
-    ax.set_axisbelow(True) # Ensure grid is behind data
+    # *** NEW: Move Y-axis to the right side ***
+    ax.yaxis.tick_right()
+    ax.yaxis.set_label_position("right")
 
-    # 6. Set labels (no title or legend)
+    # 6. Add gridlines (the style 'seaborn-whitegrid' handles this, but we ensure minor are on)
+    # *** UPDATED: Made minor gridlines slightly bolder/more visible ***
+    ax.grid(which='minor', linestyle=':', linewidth='0.5', color='gray', alpha=0.5)
+
+    # 7. Set labels, title, and legend
     ax.set_xlabel('Horner Time (tp + Δt) / Δt', fontsize=12)
     ax.set_ylabel('Shut-in Pressure (Pwsf), psi', fontsize=12)
-    
+    ax.set_title('Horner Plot Analysis', fontsize=16, fontweight='bold')
+    # *** CHANGED: Added 'frameon=True' to make legend easier to read ***
+    ax.legend(loc='lower left', frameon=True)
+
+    # 8. Remove the top and left plot borders for a cleaner look
+    # *** CHANGED: Now remove 'left' spine instead of 'right' ***
+    ax.spines[['top', 'left']].set_visible(False)
+    # *** NEW: Keep the 'right' spine since the axis is there ***
+    ax.spines['right'].set_visible(True)
+
+    # --- 9. *** REMOVED ALL ANNOTATIONS FOR A CLEANER LOOK *** ---
+
     plt.tight_layout()
 
     return results, fig, df, mtr_info
@@ -308,19 +353,29 @@ def main():
             st.subheader("Reservoir & Fluid Properties")
             col1, col2 = st.columns(2)
             with col1:
-                h = st.number_input("Pay Thickness, h (ft)", value=10.0, min_value=0.1, format="%.2f")
-                Qo = st.number_input("Flow Rate, Qo (bbl/d)", value=135.0, min_value=0.1, format="%.2f")
-                mu_o = st.number_input("Viscosity, μo (cp)", value=1.5, min_value=0.1, format="%.2f")
-                Bo = st.number_input("FVF, Bo (RB/STB)", value=1.15, min_value=0.1, format="%.3f")
+                # *** ADDED step=1.0 ***
+                h = st.number_input("Pay Thickness, h (ft)", value=10.0, min_value=0.1, format="%.2f", step=1.0)
+                # *** ADDED step=1.0 ***
+                Qo = st.number_input("Flow Rate, Qo (bbl/d)", value=135.0, min_value=0.1, format="%.2f", step=1.0)
+                # *** ADDED step=0.1 ***
+                mu_o = st.number_input("Viscosity, μo (cp)", value=1.5, min_value=0.1, format="%.2f", step=0.1)
+                # *** ADDED step=0.01 ***
+                Bo = st.number_input("FVF, Bo (RB/STB)", value=1.15, min_value=0.1, format="%.3f", step=0.01)
             with col2:
-                rw = st.number_input("Wellbore Radius, rw (ft)", value=0.333, min_value=0.01, format="%.3f")
-                phi = st.number_input("Porosity, φ", value=0.10, min_value=0.01, max_value=0.5, format="%.3f")
-                Ct = st.number_input("Compressibility, Ct (psi⁻¹)", value=8.4e-6, format="%.2e")
-                pwf_final = st.number_input("Final Flow P, Pwf (psi)", value=350.0, min_value=0.0, format="%.1f")
+                # *** ADDED step=0.01 ***
+                rw = st.number_input("Wellbore Radius, rw (ft)", value=0.333, min_value=0.01, format="%.3f", step=0.01)
+                # *** ADDED step=0.01 ***
+                phi = st.number_input("Porosity, φ", value=0.10, min_value=0.01, max_value=0.5, format="%.3f", step=0.01)
+                # *** ADDED step=1e-7 ***
+                Ct = st.number_input("Compressibility, Ct (psi⁻¹)", value=8.4e-6, format="%.2e", step=1e-7)
+                # *** ADDED step=1.0 ***
+                pwf_final = st.number_input("Final Flow P, Pwf (psi)", value=350.0, min_value=0.0, format="%.1f", step=1.0)
 
             st.subheader("DST Test Parameters")
+            # *** ADDED step=1.0 as requested ***
             tp = st.number_input("Total Flow Time, tp (min)", value=60.0, min_value=0.1, format="%.1f",
-                                help="The *total* duration of the flow period (tp) in minutes. This is used for all calculations.")
+                                help="The *total* duration of the flow period (tp) in minutes. This is used for all calculations.",
+                                step=1.0)
 
             st.subheader("Pressure Buildup Data")
             default_data = """5, 965
@@ -338,7 +393,7 @@ def main():
                 height=200,
                 help="Enter one 'time, pressure' pair per line. Example: '5, 965'"
             )
-            
+
             # --- REMOVED SLIDER FOR REGRESSION SETTINGS ---
             # The app is now fully automatic.
 
@@ -415,7 +470,8 @@ def main():
         tab1, tab2, tab3 = st.tabs(["📊 Horner Plot", "📥 Data Table", "🧪 Formulas"])
         with tab1:
             if st.session_state.figure:
-                st.pyplot(st.session_state.figure)
+                # *** CHANGED: Increased dpi to 300 for maximum quality ***
+                st.pyplot(st.session_state.figure, dpi=300)
             else:
                 st.info("The Horner plot will appear here after analysis")
         with tab2:
