@@ -14,7 +14,7 @@ import base64
 
 # --- Page configuration ---
 st.set_page_config(
-    page_title="DST Horner Analyst",
+    page_title="DST Horner Analyst (Smart-Fit)",
     page_icon="📈",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -507,6 +507,10 @@ def main():
 
             st.latex(r"S = 1.151 \left[ \left(\frac{p_i - p_{wf}}{m}\right) - \log\left(\frac{k \cdot t_{p(hr)}}{\phi \cdot \mu_o \cdot C_t \cdot r_w^2}\right) + 3.23 \right]")
             st.caption("Skin Factor (S)")
+
+            st.latex(r"(\Delta P_{Skin}) = 141.2 \left( \frac{Q_o \cdot \mu_o \cdot B_o}{k \cdot h} \right) S")
+            st.caption("Pressure Drop (Skin)")
+
 
             st.latex(r"FE = \frac{p_i - p_{wf} - \Delta p_{skin}}{p_i - p_{wf}}")
             st.caption("Flow Efficiency (FE)")
