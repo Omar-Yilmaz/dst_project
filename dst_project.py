@@ -53,7 +53,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # --- NEW "SMART" Auto MTR detection function ---
-def find_best_mtr(df, min_points=3, slope_stability_threshold=0.05):
+def find_best_mtr(df, min_points=3, slope_stability_threshold=0.15):
     """
     Automatically find the *final* straight line segment (MTR)
     by finding the most stable, high-R-squared line from the *end* of the dataset.
@@ -101,10 +101,11 @@ def find_best_mtr(df, min_points=3, slope_stability_threshold=0.05):
             # Check how much the R-squared changed
             r_squared_change = r_squared - best_r_squared
 
+            # --- *** NEW LOGIC *** ---
             # We prefer a new line IF:
-            # 1. It is significantly "straighter" (e.g., 0.999 vs 0.990)
+            # 1. It is significantly "straighter" (R² got better)
             # OR
-            # 2. It is similarly straight (R² change is small) AND the slope is stable (slope change is small)
+            # 2. It is still *very* straight (R² > 0.99) AND the slope is stable.
 
             if r_squared_change > 0.0001: # Case 1: Significantly straighter
                 best_r_squared = r_squared
@@ -113,8 +114,9 @@ def find_best_mtr(df, min_points=3, slope_stability_threshold=0.05):
                 best_n_points = num_regression_points
                 previous_slope = current_slope
 
-            elif abs(r_squared_change) < 0.0001 and slope_change_percent < slope_stability_threshold: # Case 2: Stable and straight
+            elif r_squared > 0.99 and slope_change_percent < slope_stability_threshold: # Case 2: Still very straight AND slope is stable
                 # This line is also good and is longer, so we accept it
+                # This handles cases where R² drops slightly (e.g. 0.9999 -> 0.9995)
                 best_r_squared = r_squared
                 best_regression = regression
                 best_fit_df = fit_df_loop
@@ -123,7 +125,8 @@ def find_best_mtr(df, min_points=3, slope_stability_threshold=0.05):
 
             else:
                 # This new point (e.g., dt=20) breaks the stability.
-                # The R² is not much better, AND the slope changed too much.
+                # EITHER the R² dropped too much (e.g., below 0.99)
+                # OR the R² is high BUT the slope was unstable.
                 # So, we STOP and keep the *previous* stable line.
                 break
 
@@ -136,7 +139,7 @@ def find_best_mtr(df, min_points=3, slope_stability_threshold=0.05):
     return best_fit_df, best_regression
 
 # --- Main Analysis Function ---
-def perform_analysis(h, Qo, mu_o, Bo, rw, phi, Ct, pwf_final, tp, data_text, min_points_for_mtr):
+def perform_analysis(h, Qo, mu_o, Bo, rw, phi, Ct, pwf_final, tp, data_text):
     """
     Performs the complete DST analysis based on user inputs.
     """
@@ -187,10 +190,11 @@ def perform_analysis(h, Qo, mu_o, Bo, rw, phi, Ct, pwf_final, tp, data_text, min
     df['log_horner_time'] = log_horner_time
 
     # --- 3. Auto-detect MTR, Perform Linear Regression ---
-    fit_df, regression = find_best_mtr(df, min_points=min_points_for_mtr)
+    # We set min_points to 3, the minimum for a stable regression.
+    fit_df, regression = find_best_mtr(df, min_points=3)
 
     if fit_df is None or regression is None:
-        st.error("Automatic straight-line detection failed. Try adjusting the 'Minimum points' slider.")
+        st.error("Automatic straight-line detection failed. The data may be too noisy.")
         return None, None, None, None
 
     m = abs(regression.slope)  # m is positive psi/cycle
@@ -323,15 +327,8 @@ def main():
                 help="Enter one 'time, pressure' pair per line. Example: '5, 965'"
             )
 
-            st.subheader("Regression Settings")
-            st.caption("The app will automatically find the best straight line (MTR) using at least this many points.")
-            min_points_for_mtr = st.slider(
-                "Minimum points for automatic line detection",
-                min_value=3,
-                max_value=max(3, len(default_data.strip().split('\n'))),
-                value=4, # Set default to 4 to match lecture
-                help="Minimum number of data points (from the end of the list) to use for the straight-line fit."
-            )
+            # --- REMOVED SLIDER FOR REGRESSION SETTINGS ---
+            # The app is now fully automatic.
 
             submitted = st.form_submit_button("🚀 Run Analysis")
 
@@ -339,7 +336,7 @@ def main():
     if submitted:
         with st.spinner("Auto-detecting MTR and performing analysis..."):
             results, figure, dataframe, mtr_info = perform_analysis(
-                h, Qo, mu_o, Bo, rw, phi, Ct, pwf_final, tp, data_text, min_points_for_mtr
+                h, Qo, mu_o, Bo, rw, phi, Ct, pwf_final, tp, data_text
             )
             if results is not None:
                 st.session_state.results = results
