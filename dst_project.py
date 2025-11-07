@@ -1,5 +1,5 @@
 """
-Enhanced Interactive DST Horner Plot Analyst (Auto MTR Detection)
+Enhanced Interactive DST Horner Plot Analyst (Smart Auto MTR Detection)
 Professional web application for Drill Stem Test analysis
 """
 
@@ -13,8 +13,8 @@ import base64
 
 # --- Page configuration ---
 st.set_page_config(
-    page_title="DST Horner Analyst (Auto-Fit)",
-    page_icon="📈",  # <-- EDITED: Changed icon from 🤖 to 📈
+    page_title="DST Horner Analyst (Smart-Fit)",
+    page_icon="📈",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -52,12 +52,12 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# --- Auto MTR detection function (Improved Logic) ---
-def find_best_mtr(df, min_points=3):
+# --- NEW "SMART" Auto MTR detection function ---
+def find_best_mtr(df, min_points=3, slope_stability_threshold=0.05):
     """
     Automatically find the *final* straight line segment (MTR)
-    by finding the highest R-squared value from the *end* of the dataset.
-    
+    by finding the most stable, high-R-squared line from the *end* of the dataset.
+
     Returns:
         best_fit_df: The data slice used for best regression.
         best_regression: linregress result for best fit.
@@ -68,44 +68,77 @@ def find_best_mtr(df, min_points=3):
     best_n_points = 0
 
     n = len(df)
-    
+
+    # Store previous slope to check for stability
+    previous_slope = None
+
     # We only check slices that *end* at the last data point.
-    # This is the correct engineering approach for finding the *final* MTR.
     for num_regression_points in range(min_points, n + 1):
         slice_index = max(0, n - num_regression_points)
         fit_df_loop = df.iloc[slice_index:].copy()
-        
+
         if len(fit_df_loop) < 2:
             continue
 
         try:
             regression = linregress(fit_df_loop['log_horner_time'].values, fit_df_loop['pwsf'].values)
             r_squared = regression.rvalue ** 2
-            
-            # If this line is "straighter" (higher R-squared), save it as the best one.
-            if r_squared > best_r_squared:
+            current_slope = abs(regression.slope)
+
+            # --- SMART STABILITY CHECK ---
+            # If this is the first valid line, save it
+            if previous_slope is None:
+                previous_slope = current_slope
                 best_r_squared = r_squared
                 best_regression = regression
                 best_fit_df = fit_df_loop
                 best_n_points = num_regression_points
-                
-        except Exception as e:
-            # This handles cases where the fit might fail
+                continue
+
+            # Check how much the slope changed by adding one more point
+            slope_change_percent = abs(current_slope - previous_slope) / previous_slope
+
+            # Check how much the R-squared changed
+            r_squared_change = r_squared - best_r_squared
+
+            # We prefer a new line IF:
+            # 1. It is significantly "straighter" (e.g., 0.999 vs 0.990)
+            # OR
+            # 2. It is similarly straight (R² change is small) AND the slope is stable (slope change is small)
+
+            if r_squared_change > 0.0001: # Case 1: Significantly straighter
+                best_r_squared = r_squared
+                best_regression = regression
+                best_fit_df = fit_df_loop
+                best_n_points = num_regression_points
+                previous_slope = current_slope
+
+            elif abs(r_squared_change) < 0.0001 and slope_change_percent < slope_stability_threshold: # Case 2: Stable and straight
+                # This line is also good and is longer, so we accept it
+                best_r_squared = r_squared
+                best_regression = regression
+                best_fit_df = fit_df_loop
+                best_n_points = num_regression_points
+                previous_slope = current_slope
+
+            else:
+                # This new point (e.g., dt=20) breaks the stability.
+                # The R² is not much better, AND the slope changed too much.
+                # So, we STOP and keep the *previous* stable line.
+                break
+
+        except Exception:
             continue
-            
+
     if best_regression is None:
         return None, None
-        
+
     return best_fit_df, best_regression
 
 # --- Main Analysis Function ---
 def perform_analysis(h, Qo, mu_o, Bo, rw, phi, Ct, pwf_final, tp, data_text, min_points_for_mtr):
     """
     Performs the complete DST analysis based on user inputs.
-
-    This function takes all reservoir parameters and the raw data text,
-    parses the data, performs linear regression (auto MTR), calculates all key
-    petroleum engineering metrics, and returns the results, plot, and data.
     """
 
     # Input validation
@@ -155,7 +188,7 @@ def perform_analysis(h, Qo, mu_o, Bo, rw, phi, Ct, pwf_final, tp, data_text, min
 
     # --- 3. Auto-detect MTR, Perform Linear Regression ---
     fit_df, regression = find_best_mtr(df, min_points=min_points_for_mtr)
-    
+
     if fit_df is None or regression is None:
         st.error("Automatic straight-line detection failed. Try adjusting the 'Minimum points' slider.")
         return None, None, None, None
@@ -187,7 +220,7 @@ def perform_analysis(h, Qo, mu_o, Bo, rw, phi, Ct, pwf_final, tp, data_text, min
         'r_squared': r_squared,
         'dP_skin': dP_skin
     }
-    
+
     mtr_info = {
         'num_points': len(fit_df),
         'start_dt': float(fit_df['dt'].iloc[0]),
@@ -239,7 +272,7 @@ def main():
     st.markdown("""
     A professional web application for Drill Stem Test (DST) analysis using the Horner method. 
     This tool automates the calculation of key reservoir properties from pressure buildup data,
-    now with **automatic straight-line region (MTR) detection** for regression.
+    now with **smart automatic straight-line region (MTR) detection**.
     """)
 
     # --- Initialize session state ---
@@ -336,7 +369,7 @@ def main():
             st.metric("Radius of Investigation, rᵢ", f"{results['ri']:.1f} ft")
             st.metric("Regression R-squared", f"{results['r_squared']:.4f}")
             st.markdown('</div>', unsafe_allow_html=True)
-            
+
             # MTR Info
             if mtr_info:
                 st.info(f"**Auto-MTR Successful:** Found best line (R²={results['r_squared']:.4f}) using the **last {mtr_info['num_points']} points** (from Δt = {mtr_info['start_dt']} to {mtr_info['end_dt']} min).")
@@ -397,19 +430,19 @@ def main():
             st.subheader("Key Formulas")
             st.latex(r"p_{ws} = p_i - m \log\left(\frac{t_p + \Delta t}{\Delta t}\right)")
             st.caption("Horner Equation (m = slope)")
-            
+
             st.latex(r"m = \frac{P_{ws_1} - P_{ws_{10}}}{\log(10) - \log(1)}")
             st.caption("Horner Slope (Manual Plot Reading)")
-            
+
             st.latex(r"m = \frac{\Delta P}{\Delta \log(\text{Horner Time})} \quad \text{(Linear Regression)}")
             st.caption("Horner Slope (Automated in this App)")
-            
+
             st.latex(r"k = \frac{162.6 \cdot Q_o \cdot \mu_o \cdot B_o}{m \cdot h}")
             st.caption("Permeability (k)")
-            
+
             st.latex(r"S = 1.151 \left[ \left(\frac{p_i - p_{wf}}{m}\right) - \log\left(\frac{k \cdot t_{p(hr)}}{\phi \cdot \mu_o \cdot C_t \cdot r_w^2}\right) + 3.23 \right]")
             st.caption("Skin Factor (S)")
-            
+
             st.latex(r"FE = \frac{p_i - p_{wf} - \Delta p_{skin}}{p_i - p_{wf}}")
             st.caption("Flow Efficiency (FE)")
 
