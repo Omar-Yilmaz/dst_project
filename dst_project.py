@@ -1,7 +1,7 @@
 """
 Enhanced Interactive DST Horner Plot Analyst (Smart Auto MTR Detection)
 Professional web application for Drill Stem Test analysis
-V9.1 - Added MTR Sensitivity Slider
+V9.4 - Auto-Solve for Flow Capacity (kh) and Transmissibility
 """
 
 import streamlit as st
@@ -167,12 +167,15 @@ def perform_analysis(h, Qo, mu_o, Bo, rw, phi, Ct, pwf_final, tp, data_text, dt_
     """
     Performs the complete DST analysis based on user inputs.
     Calculations are now modular and can be overridden.
+    V9.4 can auto-solve for Pwf, kh, and Transmissibility.
     """
 
     # --- 0. Initialize Results Dictionary ---
     results = {
-        'm': None, 'pi': None, 'k': None, 'S': None,
-        'FE': None, 'ri': None, 'r_squared': None, 'dP_skin': None
+        'm': None, 'pi': None,
+        'k': None, 'kh_calc': None, 'transmissibility_calc': None, # <-- NEW
+        'S': None, 'FE': None, 'ri': None, 'r_squared': None, 'dP_skin': None,
+        'pwf_final_calc': None
     }
     mtr_info = None
     fig_horner = None
@@ -180,13 +183,13 @@ def perform_analysis(h, Qo, mu_o, Bo, rw, phi, Ct, pwf_final, tp, data_text, dt_
     df = None
     fit_df = None # Initialize
     k = 0 # Initialize
+    pwf_final_to_use = pwf_final # Use the input value by default
 
     # --- 1. Essential Input Validation ---
-    essential_params = {'h': h, 'Qo': Qo, 'mu_o': mu_o, 'Bo': Bo, 'tp': tp}
-    for name, param in essential_params.items():
-        if param <= 0:
-            st.error(f"Essential parameter '{name}' must be a positive value.")
-            return results, fig_horner, df, mtr_info, fig_residuals
+    # V9.4 - Only tp and Qo are *truly* essential for the first steps
+    if tp <= 0:
+        st.error("Essential parameter 'Total Flow Time, tp (min)' must be a positive value.")
+        return results, fig_horner, df, mtr_info, fig_residuals
 
     # Clear previous results from session state
     st.session_state.results = None
@@ -217,7 +220,6 @@ def perform_analysis(h, Qo, mu_o, Bo, rw, phi, Ct, pwf_final, tp, data_text, dt_
         return results, fig_horner, df, mtr_info, fig_residuals
 
     # --- 2b. NEW: Unit Conversion ---
-    # tp is already in minutes. We must ensure dt is also in minutes.
     if dt_unit == "hours":
         st.warning("Converting input Δt from hours to minutes for calculation.")
         df['dt_calc'] = df['dt'] * 60.0
@@ -231,11 +233,6 @@ def perform_analysis(h, Qo, mu_o, Bo, rw, phi, Ct, pwf_final, tp, data_text, dt_
     log_horner_time = np.log10(horner_time)
     df['horner_time'] = horner_time
     df['log_horner_time'] = log_horner_time
-
-    # *** V9.0 Logic ***
-    # Sort by LOG HORNER TIME (ascending)
-    # This puts the WBS points (high Horner time) at the end
-    # and the MTR points (low Horner time) at the *start* (index 0).
     df = df.sort_values(by='log_horner_time', ascending=True).reset_index(drop=True)
 
     # --- 4. Determine m, pi (OVERRIDE LOGIC) ---
@@ -277,12 +274,20 @@ def perform_analysis(h, Qo, mu_o, Bo, rw, phi, Ct, pwf_final, tp, data_text, dt_
     df['predicted_pwsf'] = pi + m_slope * df['log_horner_time']
     df['residual'] = df['pwsf'] - df['predicted_pwsf']
 
-    # --- 6. Permeability Calculation (OVERRIDE LOGIC) ---
+    # --- 6. Permeability Calculation (V9.4 MODULAR LOGIC) ---
+    # This logic block determines k, kh, or T.
+
+    # k: Permeability (md)
+    # kh: Flow Capacity (md-ft)
+    # T: Transmissibility (md-ft/cp)
+
     if k_override > 0:
         st.info(f"Using user-provided k = {k_override} md")
         k = k_override
         results['k'] = k
-    else:
+
+    # Check if we can calculate k (ALL essentials must be > 0)
+    elif h > 0 and Qo > 0 and mu_o > 0 and Bo > 0:
         try:
             k = (162.6 * (Qo * mu_o * Bo)) / (m_abs * h)
             results['k'] = k
@@ -290,34 +295,75 @@ def perform_analysis(h, Qo, mu_o, Bo, rw, phi, Ct, pwf_final, tp, data_text, dt_
             st.warning(f"Could not calculate Permeability (k): {e}")
             k = 0 # Set k to 0 so subsequent calcs fail gracefully
 
+    # Check if we can calculate kh (h=0, but other fluids > 0)
+    elif h == 0 and Qo > 0 and mu_o > 0 and Bo > 0:
+        try:
+            kh_calc = (162.6 * (Qo * mu_o * Bo)) / m_abs
+            results['kh_calc'] = kh_calc
+            st.success("`h` is 0, solving for Flow Capacity (kh) instead of k.")
+        except Exception as e:
+            st.warning(f"Could not calculate Flow Capacity (kh): {e}")
+
+    # Check if we can calculate T (h=0, mu_o=0, but flow > 0)
+    elif h == 0 and mu_o == 0 and Qo > 0 and Bo > 0:
+        try:
+            transmissibility_calc = (162.6 * (Qo * Bo)) / m_abs
+            results['transmissibility_calc'] = transmissibility_calc
+            st.success("`h` and `μo` are 0, solving for Transmissibility (kh/μo) instead of k.")
+        except Exception as e:
+            st.warning(f"Could not calculate Transmissibility: {e}")
+
     # --- 7. Skin, dP_Skin, FE Calculation (OVERRIDE LOGIC) ---
     S_calculated = False # Flag
     S = 0.0 # Initialize S
-    if S_override != 0: # Allow negative overrides
+
+    # --- NEW: V9.2 Auto-Solve for Pwf ---
+    # Check if we should *calculate* Pwf
+    # This requires S_override, k, and all optionals
+    if S_override != 0 and pwf_final == 0 and k > 0 and phi > 0 and Ct > 0 and rw > 0:
+        try:
+            st.success("Solving for `Pwf (Final Flow P)` based on `S_override`...")
+            S = S_override
+            results['S'] = S
+            S_calculated = True
+
+            # Rearrange the Skin equation to solve for Pwf
+            log_term_B = np.log10((k * tp_hr) / (phi * mu_o * Ct * (rw ** 2)))
+            A = (S / 1.151) + log_term_B - 3.23
+            pwf_final_calc = pi - (A * m_abs)
+            results['pwf_final_calc'] = pwf_final_calc
+            pwf_final_to_use = pwf_final_calc # Use this calculated value
+
+        except Exception as e:
+            st.warning(f"Could not auto-solve for Pwf: {e}")
+            S_calculated = False # Failed, so we can't proceed
+
+    # --- Standard Skin Calculation ---
+    elif S_override != 0: # User provided S, but not trying to solve for Pwf
         st.info(f"Using user-provided S = {S_override}")
         S = S_override
         results['S'] = S
-        S_calculated = True # We have a value for S
+        S_calculated = True
     else:
-        # Try to calculate S
-        if k > 0 and phi > 0 and Ct > 0 and rw > 0 and pwf_final > 0:
+        # Try to calculate S normally
+        # This requires k > 0 and all optionals
+        if k > 0 and phi > 0 and Ct > 0 and rw > 0 and pwf_final_to_use > 0:
             try:
-                # tp_hr is correct here, as it's the duration of flow in hours
                 log_term = np.log10((k * tp_hr) / (phi * mu_o * Ct * (rw ** 2)))
-                S = 1.151 * (((pi - pwf_final) / m_abs) - log_term + 3.23)
+                S = 1.151 * (((pi - pwf_final_to_use) / m_abs) - log_term + 3.23)
                 results['S'] = S
-                S_calculated = True # We have a value for S
+                S_calculated = True
             except Exception as e:
                 st.warning(f"Could not calculate Skin (S): {e}. Check optional parameters.")
 
-    # Now, calculate dP_skin and FE *if* we have a skin value (either provided or calculated)
-    if S_calculated:
+    # Now, calculate dP_skin and FE *if* we have a skin value AND k
+    if S_calculated and k > 0 and h > 0 and pwf_final_to_use > 0:
         try:
             dP_skin = (141.2 * (Qo * mu_o * Bo) / (k * h)) * S
             results['dP_skin'] = dP_skin
 
-            if (pi - pwf_final) != 0:
-                FE = (pi - pwf_final - dP_skin) / (pi - pwf_final)
+            if (pi - pwf_final_to_use) != 0:
+                FE = (pi - pwf_final_to_use - dP_skin) / (pi - pwf_final_to_use)
                 results['FE'] = FE
             else:
                 st.warning("Could not calculate Flow Efficiency (FE): (pi - pwf) is zero.")
@@ -326,7 +372,7 @@ def perform_analysis(h, Qo, mu_o, Bo, rw, phi, Ct, pwf_final, tp, data_text, dt_
 
 
     # --- 8. Radius of Investigation (Depends on optionals) ---
-    if k > 0 and phi > 0 and Ct > 0:
+    if k > 0 and phi > 0 and Ct > 0 and mu_o > 0: # mu_o is also needed
         try:
             # tp is already in minutes, use it directly
             ri = np.sqrt((k * tp) / (5.76e4 * phi * mu_o * Ct))
@@ -422,7 +468,7 @@ def perform_analysis(h, Qo, mu_o, Bo, rw, phi, Ct, pwf_final, tp, data_text, dt_
     # Dynamic Y-axis for residuals
     max_abs_residual = df['residual'].abs().max()
     # Handle case where residuals are 0 or NaN
-    if not np.isfinite(max_abs_residual):
+    if not np.isfinite(max_abs_residual) or max_abs_residual == 0:
         max_abs_residual = 1.0 # default value
     res_padding = max(max_abs_residual * 0.15, 5.0) # 15% padding, min 5 psi
     ax_res.set_ylim(-max_abs_residual - res_padding, max_abs_residual + res_padding)
@@ -509,32 +555,38 @@ def main():
     with st.sidebar:
         st.header("📊 Input Parameters")
         with st.form(key='input_form'):
-            st.subheader("Reservoir & Fluid Properties")
+
+            # --- V9.3: Combined Section ---
+            st.subheader("Reservoir & Test Properties")
+            st.caption("Enter all known values. Leave at 0 to auto-calculate.")
+
             col1, col2 = st.columns(2)
-
-            # --- ESSENTIAL PARAMETERS ---
-            st.markdown("**Essential Parameters**")
             with col1:
-                h = st.number_input("Pay Thickness, h (ft)", value=10.0, min_value=0.1, format="%.2f", step=1.0)
-                Qo = st.number_input("Flow Rate, Qo (bbl/d)", value=135.0, min_value=0.1, format="%.2f", step=1.0)
-            with col2:
-                mu_o = st.number_input("Viscosity, μo (cp)", value=1.5, min_value=0.1, format="%.2f", step=0.1)
-                Bo = st.number_input("FVF, Bo (RB/STB)", value=1.15, min_value=0.1, format="%.3f", step=0.01)
-
-            st.markdown("---")
-            # --- OPTIONAL PARAMETERS ---
-            st.markdown("**Optional Parameters (Set to 0 if unknown)**")
-            col3, col4 = st.columns(2)
-            with col3:
-                rw = st.number_input("Wellbore Radius, rw (ft)", value=0.333, min_value=0.0, format="%.3f", step=0.01,
-                                     help="Set to 0 if unknown. Skin/FE cannot be calculated.")
+                h = st.number_input("Pay Thickness, h (ft)", value=10.0, min_value=0.0, format="%.2f", step=1.0,
+                                    help="Essential for k. If 0, will solve for kh.")
+                Qo = st.number_input("Flow Rate, Qo (bbl/d)", value=135.0, min_value=0.0, format="%.2f", step=1.0,
+                                     help="Essential for k and kh.")
+                mu_o = st.number_input("Viscosity, μo (cp)", value=1.5, min_value=0.0, format="%.2f", step=0.1,
+                                       help="Essential for k and kh. If 0, will solve for T.")
+                Bo = st.number_input("FVF, Bo (RB/STB)", value=1.15, min_value=0.0, format="%.3f", step=0.01,
+                                     help="Essential for k, kh, and T.")
                 phi = st.number_input("Porosity, φ", value=0.10, min_value=0.0, max_value=1.0, format="%.3f", step=0.01,
                                       help="Set to 0 if unknown. Skin/FE/ri cannot be calculated.")
-            with col4:
                 Ct = st.number_input("Compressibility, Ct (psi⁻¹)", value=8.4e-6, min_value=0.0, format="%.2e", step=1e-7,
                                      help="Set to 0 if unknown. Skin/FE/ri cannot be calculated.")
+            with col2:
+                rw = st.number_input("Wellbore Radius, rw (ft)", value=0.333, min_value=0.0, format="%.3f", step=0.01,
+                                     help="Set to 0 if unknown. Skin/FE cannot be calculated.")
                 pwf_final = st.number_input("Final Flow P, Pwf (psi)", value=350.0, min_value=0.0, format="%.1f", step=1.0,
-                                            help="Set to 0 if unknown. Skin/FE cannot be calculated.")
+                                            help="Set to 0 if unknown. Will be auto-solved if S is provided.")
+                m_override = st.number_input("Horner Slope 'm'", value=0.0, min_value=0.0, format="%.2f",
+                                             help="Override: Leave at 0 to auto-detect MTR.")
+                pi_override = st.number_input("Initial Pressure 'pi'", value=0.0, min_value=0.0, format="%.1f",
+                                              help="Override: Leave at 0 to auto-extrapolate.")
+                k_override = st.number_input("Permeability 'k' (md)", value=0.0, min_value=0.0, format="%.2f",
+                                             help="Override: Leave at 0 to auto-calculate from m.")
+                S_override = st.number_input("Skin 'S'", value=0.0, format="%.2f",
+                                            help="Override: Enter non-zero value. If Pwf=0, will solve for Pwf.")
 
             st.markdown("---")
             st.subheader("DST Test Parameters")
@@ -542,28 +594,16 @@ def main():
                                 help="The *total* duration of the flow period (tp) in minutes.",
                                 step=1.0)
 
-            # --- NEW: ADVANCED OVERRIDES ---
-            with st.expander("⚙️ Advanced Overrides (Optional)"):
-                st.markdown("""
-                Use this section if you want to *force* a value instead of letting the app calculate it.
-                **Leave at 0 to auto-calculate.**
-                """)
-                # --- NEW: MTR Sensitivity Slider ---
-                mtr_sensitivity = st.slider(
-                    "MTR Detection Sensitivity (Min R²)",
-                    min_value=0.950,
-                    max_value=1.000,
-                    value=0.995, # Default
-                    step=0.001,
-                    format="%.3f",
-                    help="Lower = less strict (finds longer, less straight lines). Higher = more strict (finds shorter, perfect lines)."
-                )
-                m_override = st.number_input("Override Horner Slope 'm'", value=0.0, min_value=0.0, format="%.2f")
-                pi_override = st.number_input("Override Initial Pressure 'pi'", value=0.0, min_value=0.0, format="%.1f")
-                k_override = st.number_input("Override Permeability 'k' (md)", value=0.0, min_value=0.0, format="%.2f")
-                # Updated S_override to allow negative inputs
-                S_override = st.number_input("Override Skin 'S'", value=0.0, format="%.2f", help="Enter any non-zero value (positive or negative) to override.")
-
+            # --- NEW: MTR Sensitivity Slider ---
+            mtr_sensitivity = st.slider(
+                "MTR Detection Sensitivity (Min R²)",
+                min_value=0.950,
+                max_value=1.000,
+                value=0.995, # Default
+                step=0.001,
+                format="%.3f",
+                help="Only used if m and pi are 0. Lower = less strict (finds longer, less straight lines). Higher = more strict."
+            )
 
             st.subheader("Pressure Buildup Data")
             # --- NEW: dt Unit Selector ---
@@ -633,8 +673,21 @@ def main():
             st.markdown('<div class="result-box">', unsafe_allow_html=True)
             st.metric("Horner Slope 'm'", format_metric(results['m'], "psi/cycle", ":.2f"))
             st.metric("Initial Reservoir Pressure, pᵢ", format_metric(results['pi'], "psi", ":.1f"))
-            st.metric("Formation Permeability, k", format_metric(results['k'], "md", ":.2f"))
+
+            # --- NEW: Modular k, kh, T display ---
+            if results['k'] is not None:
+                st.metric("Formation Permeability, k", format_metric(results['k'], "md", ":.2f"))
+            if results['kh_calc'] is not None:
+                st.metric("Flow Capacity, kh (CALCULATED)", format_metric(results['kh_calc'], "md-ft", ":.1f"))
+            if results['transmissibility_calc'] is not None:
+                st.metric("Transmissibility, T (CALCULATED)", format_metric(results['transmissibility_calc'], "md-ft/cp", ":.1f"))
+
             st.metric("Skin Factor, S", format_metric(results['S'], "", ":.2f"))
+
+            # --- NEW: Show calculated Pwf ---
+            if results['pwf_final_calc'] is not None:
+                st.metric("Final Flow P, Pwf (CALCULATED)", format_metric(results['pwf_final_calc'], "psi", ":.1f"))
+
             st.metric("Pressure Drop (Skin), ΔP_skin", format_metric(results['dP_skin'], "psi", ":.1f"))
             st.metric("Flow Efficiency, FE", format_metric(results['FE'], "", ":.3f"))
             st.metric("Radius of Investigation, rᵢ", format_metric(results['ri'], "ft", ":.1f"))
@@ -662,7 +715,7 @@ def main():
                 else: skin_interpretation = "Severely damaged well"
                 st.write(f"**Skin Factor Interpretation:** {skin_interpretation}")
             else:
-                st.write("**Skin Factor Interpretation:** Skin not calculated (requires `phi`, `Ct`, `rw`, `Pwf`).")
+                st.write("**Skin Factor Interpretation:** Skin not calculated (k or other params missing).")
 
             if results['FE'] is not None:
                 if results['FE'] > 1.0: fe_interpretation = "Well is stimulated"
@@ -671,7 +724,7 @@ def main():
                 else: fe_interpretation = "Poor flow efficiency"
                 st.write(f"**Flow Efficiency:** {fe_interpretation}")
             else:
-                st.write("**Flow Efficiency:** FE not calculated (requires `phi`, `Ct`, `rw`, `Pwf`).")
+                st.write("**Flow Efficiency:** FE not calculated (k or other params missing).")
 
         else:
             st.info("👈 Enter parameters and click 'Run Analysis' to see results")
@@ -744,6 +797,7 @@ def main():
                 decision_style = {'shape': 'diamond', 'style': 'filled', 'fillcolor': '#f0f2f6', 'fontname': 'Inter'}
                 result_style = {'shape': 'box', 'style': 'rounded,filled', 'fillcolor': '#e6ffed', 'fontname': 'Inter'}
                 manual_style = {'shape': 'box', 'style': 'rounded,filled', 'fillcolor': '#f0e6ff', 'fontname': 'Inter'}
+                calc_style = {'shape': 'box', 'style': 'rounded,filled', 'fillcolor': '#e6fff9', 'fontname': 'Inter'}
 
 
                 # Define nodes
@@ -753,21 +807,29 @@ def main():
 
                 dot.node('D', '4. m & pi Overridden?', **decision_style)
                 dot.node('D_yes', 'Use User-Provided m & pᵢ', **manual_style)
-                dot.node('D_no', 'Run Smart MTR Detection\n(V9.0 "Best Segment" Logic)', **brain_style)
-                dot.node('D_calc', 'Calculate m & pᵢ from MTR', **node_style)
+                dot.node('D_no', 'Run Smart MTR Detection\n(V9.1 "Best Segment" Logic)', **brain_style)
+                dot.node('D_calc', 'Get m & pᵢ from MTR', **node_style)
 
                 dot.node('E', '5. k Overridden?', **decision_style)
                 dot.node('E_yes', 'Use User-Provided k', **manual_style)
-                dot.node('E_no', 'Calculate k', **node_style)
+                dot.node('E_no', '6. All Essentials?\n(h, Qo, μ, Bo > 0)', **decision_style)
+                dot.node('E_no_yes', 'Calculate k', **calc_style)
+                dot.node('E_no_no', '7. Can Calc kh?\n(h=0, Qo, μ, Bo > 0)', **decision_style)
+                dot.node('E_no_no_yes', 'Calculate kh\n(Flow Capacity)', **calc_style)
+                dot.node('E_no_no_no', '8. Can Calc T?\n(h=0, μ=0, Qo, Bo > 0)', **decision_style)
+                dot.node('E_no_no_no_yes', 'Calculate T\n(Transmissibility)', **calc_style)
+                dot.node('E_no_no_no_no', 'Cannot Calculate\nk, kh, or T', **node_style)
 
-                dot.node('F', '6. S Overridden?', **decision_style)
+                dot.node('F', '9. S Overridden?', **decision_style)
                 dot.node('F_yes', 'Use User-Provided S', **manual_style)
-                dot.node('F_no', 'Optional Params OK?\n(phi, Ct, rw, pwf > 0)', **decision_style)
-                dot.node('F_calc', 'Calculate S', **node_style)
-                dot.node('F_skip', 'S = Not Calculated', **node_style)
+                dot.node('F_no', 'Try to Calculate S', **node_style)
 
-                dot.node('G', '7. Calculate Final Properties\n(ΔP_skin, FE, rᵢ)', **node_style)
-                dot.node('H', '8. End: Display Results & Plots', **result_style)
+                dot.node('G', '10. Auto-Solve for Pwf?', **decision_style)
+                dot.node('G_yes', 'Calculate Pwf (from S)', **calc_style)
+                dot.node('G_no', 'Use Pwf input', **node_style)
+
+                dot.node('H', '11. Calculate Final Properties\n(ΔP_skin, FE, rᵢ)', **node_style)
+                dot.node('I', '12. End: Display Results & Plots', **result_style)
 
                 # Define edges (arrows)
                 dot.edge('A', 'B')
@@ -783,20 +845,34 @@ def main():
 
                 dot.edge('E', 'E_yes', label='  Yes  ')
                 dot.edge('E', 'E_no', label='  No  ')
-                # Corrected flowchart logic
+                dot.edge('E_no', 'E_no_yes', label='  Yes  ')
+                dot.edge('E_no', 'E_no_no', label='  No  ')
+
+                dot.edge('E_no_no', 'E_no_no_yes', label='  Yes  ')
+                dot.edge('E_no_no', 'E_no_no_no', label='  No  ')
+
+                dot.edge('E_no_no_no', 'E_no_no_no_yes', label='  Yes  ')
+                dot.edge('E_no_no_no', 'E_no_no_no_no', label='  No  ')
+
+                # Edges leading to Skin calculation
                 dot.edge('E_yes', 'F')
-                dot.edge('E_no', 'F')
+                dot.edge('E_no_yes', 'F')
+                dot.edge('E_no_no_yes', 'H') # Skip Skin if k is unknown
+                dot.edge('E_no_no_no_yes', 'H') # Skip Skin
+                dot.edge('E_no_no_no_no', 'H') # Skip Skin
 
                 dot.edge('F', 'F_yes', label='  Yes  ')
                 dot.edge('F', 'F_no', label='  No  ')
-                dot.edge('F_no', 'F_calc', label='  Yes  ')
-                dot.edge('F_no', 'F_skip', label='  No  ')
-
                 dot.edge('F_yes', 'G')
-                dot.edge('F_calc', 'G')
-                dot.edge('F_skip', 'G')
+                dot.edge('F_no', 'G')
 
-                dot.edge('G', 'H')
+                dot.edge('G', 'G_yes', label='  Yes  \n(S_override set,\nPwf = 0,\nparams OK)')
+                dot.edge('G', 'G_no', label='  No  ')
+
+                dot.edge('G_yes', 'H')
+                dot.edge('G_no', 'H')
+
+                dot.edge('H', 'I')
 
                 # Render the chart
                 st.graphviz_chart(dot)
@@ -814,11 +890,15 @@ def main():
             st.subheader("Formula Key")
             st.markdown("**Step 3: Horner Time**")
             st.latex(r"\text{Horner Time} = \frac{t_p + \Delta t}{\Delta t} \quad (\text{units must be consistent})")
-            st.markdown("**Step 5: Permeability (k)**")
-            st.latex(r"k = \frac{162.6 \cdot Q_o \cdot \mu_o \cdot B_o}{m \cdot h}")
-            st.markdown("**Step 6: Skin (S)**")
+            st.markdown("**Step 5-8: Permeability (k), Flow Capacity (kh), Transmissibility (T)**")
+            st.latex(r"k = \frac{162.6 \cdot Q_o \cdot \mu_o \cdot B_o}{m \cdot h} \quad (\text{if } h, Q_o, \mu_o, B_o > 0)")
+            st.latex(r"kh = \frac{162.6 \cdot Q_o \cdot \mu_o \cdot B_o}{m} \quad (\text{if } h=0)")
+            st.latex(r"T = \frac{kh}{\mu_o} = \frac{162.6 \cdot Q_o \cdot B_o}{m} \quad (\text{if } h=0, \mu_o=0)")
+
+            st.markdown("**Step 9-10: Skin (S) & Pwf**")
             st.latex(r"S = 1.151 \left[ \left(\frac{p_i - p_{wf}}{m}\right) - \log\left(\frac{k \cdot t_{p(hr)}}{\phi \cdot \mu_o \cdot C_t \cdot r_w^2}\right) + 3.23 \right]")
-            st.markdown("**Step 7: Final Properties**")
+            st.caption("This equation is rearranged to solve for `Pwf` if `S` is provided.")
+            st.markdown("**Step 11: Final Properties**")
             st.latex(r"\Delta P_{skin} = \frac{141.2 \cdot Q_o \cdot \mu_o \cdot B_o}{k \cdot h} \cdot S")
             st.latex(r"FE = \frac{p_i - p_{wf} - \Delta p_{skin}}{p_i - p_{wf}}")
             st.latex(r"r_i = \sqrt{\frac{k \cdot t_p}{57600 \cdot \phi \cdot \mu_o \cdot C_t}}")
