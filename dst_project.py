@@ -2,6 +2,7 @@
 Enhanced Interactive DST Horner Plot Analyst (Smart Auto MTR Detection)
 Professional web application for Drill Stem Test analysis
 V9.4 - Auto-Solve for Flow Capacity (kh) and Transmissibility
+(Note: V9.5 derivative plot was removed as requested)
 """
 
 import streamlit as st
@@ -95,23 +96,23 @@ def find_best_mtr(df, min_points=3, min_r_squared_threshold=0.995):
     for i in range(n - min_points + 1):
         # Loop through all possible end points
         for j in range(i + min_points, n + 1):
-
+            
             fit_df_loop = df.iloc[i:j].copy()
             num_points_in_loop = len(fit_df_loop)
-
+            
             try:
                 regression = linregress(fit_df_loop['log_horner_time'].values, fit_df_loop['pwsf'].values)
-
+                
                 # Check for invalid regression results
                 if not np.isfinite(regression.slope):
                     continue
-
+                    
                 r_squared = regression.rvalue ** 2
 
                 # --- NEW LOGIC ---
                 if r_squared >= min_r_squared_threshold:
                     # This segment is "very straight"
-
+                    
                     if num_points_in_loop > best_num_points:
                         # This is the new *longest* straight line found so far
                         best_num_points = num_points_in_loop
@@ -141,7 +142,7 @@ def find_best_mtr(df, min_points=3, min_r_squared_threshold=0.995):
                     regression = linregress(fit_df_loop['log_horner_time'].values, fit_df_loop['pwsf'].values)
                     if not np.isfinite(regression.slope): continue
                     r_squared = regression.rvalue ** 2
-
+                    
                     if num_points_in_loop > best_num_points:
                         # Prioritize length
                         best_num_points = num_points_in_loop
@@ -161,8 +162,8 @@ def find_best_mtr(df, min_points=3, min_r_squared_threshold=0.995):
 
 
 # --- Main Analysis Function ---
-def perform_analysis(h, Qo, mu_o, Bo, rw, phi, Ct, pwf_final, tp, data_text, dt_unit,
-                     m_override, pi_override, k_override, S_override,
+def perform_analysis(h, Qo, mu_o, Bo, rw, phi, Ct, pwf_final, tp, data_text, dt_unit, 
+                     m_override, pi_override, k_override, S_override, 
                      mtr_sensitivity): # <-- NEW SENSITIVITY
     """
     Performs the complete DST analysis based on user inputs.
@@ -172,32 +173,33 @@ def perform_analysis(h, Qo, mu_o, Bo, rw, phi, Ct, pwf_final, tp, data_text, dt_
 
     # --- 0. Initialize Results Dictionary ---
     results = {
-        'm': None, 'pi': None,
+        'm': None, 'pi': None, 
         'k': None, 'kh_calc': None, 'transmissibility_calc': None, # <-- NEW
         'S': None, 'FE': None, 'ri': None, 'r_squared': None, 'dP_skin': None,
-        'pwf_final_calc': None
+        'pwf_final_calc': None 
     }
     mtr_info = None
     fig_horner = None
     fig_residuals = None
+    # fig_deriv = None # <-- REMOVED
     df = None
     fit_df = None # Initialize
     k = 0 # Initialize
     pwf_final_to_use = pwf_final # Use the input value by default
 
     # --- 1. Essential Input Validation ---
-    # V9.4 - Only tp and Qo are *truly* essential for the first steps
     if tp <= 0:
         st.error("Essential parameter 'Total Flow Time, tp (min)' must be a positive value.")
-        return results, fig_horner, df, mtr_info, fig_residuals
+        return results, fig_horner, df, mtr_info, fig_residuals # <-- REMOVED fig_deriv
 
     # Clear previous results from session state
     st.session_state.results = None
     st.session_state.figure = None
     st.session_state.figure_residuals = None
+    # st.session_state.figure_deriv = None # <-- REMOVED
     st.session_state.dataframe = None
     st.session_state.mtr_info = None
-    st.session_state.mtr_r2_used = None
+    st.session_state.mtr_r2_used = None 
 
     tp_hr = tp / 60.0  # tp is *always* in minutes, so tp_hr is correct
 
@@ -214,10 +216,10 @@ def perform_analysis(h, Qo, mu_o, Bo, rw, phi, Ct, pwf_final, tp, data_text, dt_
         df = df.apply(pd.to_numeric, errors='coerce').dropna()
         if len(df) < 3:
             st.error(f"Please enter at least 3 valid data points (you have {len(df)}).")
-            return results, fig_horner, df, mtr_info, fig_residuals
+            return results, fig_horner, df, mtr_info, fig_residuals # <-- REMOVED fig_deriv
     except Exception as e:
         st.error(f"Error parsing data: {str(e)}. Please check the format (e.g., '5, 965').")
-        return results, fig_horner, df, mtr_info, fig_residuals
+        return results, fig_horner, df, mtr_info, fig_residuals # <-- REMOVED fig_deriv
 
     # --- 2b. NEW: Unit Conversion ---
     if dt_unit == "hours":
@@ -233,9 +235,12 @@ def perform_analysis(h, Qo, mu_o, Bo, rw, phi, Ct, pwf_final, tp, data_text, dt_
     log_horner_time = np.log10(horner_time)
     df['horner_time'] = horner_time
     df['log_horner_time'] = log_horner_time
-    df = df.sort_values(by='log_horner_time', ascending=True).reset_index(drop=True)
+    df = df.sort_values(by='log_horner_time', ascending=True).reset_index(drop=True) 
 
-    # --- 4. Determine m, pi (OVERRIDE LOGIC) ---
+    # --- 4. Calculate Pressure Derivative (V9.5) ---
+    # <-- REMOVED DERIVATIVE CALCULATION BLOCK -->
+
+    # --- 5. Determine m, pi (OVERRIDE LOGIC) ---
     if m_override > 0 and pi_override > 0:
         st.info(f"Using user-provided m = {m_override} and pi = {pi_override}")
         m_abs = m_override
@@ -247,16 +252,16 @@ def perform_analysis(h, Qo, mu_o, Bo, rw, phi, Ct, pwf_final, tp, data_text, dt_
     else:
         # Run Smart MTR Detection (V9.1)
         fit_df, regression = find_best_mtr(df, min_points=3, min_r_squared_threshold=mtr_sensitivity)
-
+        
         if fit_df is None or regression is None:
             st.error("Automatic straight-line detection failed. The data may be too noisy.")
-            return results, fig_horner, df, mtr_info, fig_residuals
+            return results, fig_horner, df, mtr_info, fig_residuals # <-- REMOVED fig_deriv
 
         m_abs = abs(regression.slope)
         m_slope = regression.slope
         pi = regression.intercept
         r_squared = regression.rvalue ** 2
-
+        
         mtr_info = {
             'num_points': len(fit_df),
             'start_dt_orig': float(fit_df['dt'].iloc[0]), # Original dt unit
@@ -264,38 +269,28 @@ def perform_analysis(h, Qo, mu_o, Bo, rw, phi, Ct, pwf_final, tp, data_text, dt_
             'used_rows': fit_df.index.tolist()
         }
 
-
-    # --- 5. Base Calculations (Always possible) ---
+    
+    # --- 6. Base Calculations (Always possible) ---
     results['m'] = m_abs
     results['pi'] = pi
     results['r_squared'] = r_squared
-
+    
     # Calculate residuals for all points (for plotting)
     df['predicted_pwsf'] = pi + m_slope * df['log_horner_time']
     df['residual'] = df['pwsf'] - df['predicted_pwsf']
 
-    # --- 6. Permeability Calculation (V9.4 MODULAR LOGIC) ---
-    # This logic block determines k, kh, or T.
-
-    # k: Permeability (md)
-    # kh: Flow Capacity (md-ft)
-    # T: Transmissibility (md-ft/cp)
-
+    # --- 7. Permeability Calculation (V9.4 MODULAR LOGIC) ---
     if k_override > 0:
         st.info(f"Using user-provided k = {k_override} md")
         k = k_override
         results['k'] = k
-
-    # Check if we can calculate k (ALL essentials must be > 0)
     elif h > 0 and Qo > 0 and mu_o > 0 and Bo > 0:
         try:
             k = (162.6 * (Qo * mu_o * Bo)) / (m_abs * h)
             results['k'] = k
         except Exception as e:
             st.warning(f"Could not calculate Permeability (k): {e}")
-            k = 0 # Set k to 0 so subsequent calcs fail gracefully
-
-    # Check if we can calculate kh (h=0, but other fluids > 0)
+            k = 0 
     elif h == 0 and Qo > 0 and mu_o > 0 and Bo > 0:
         try:
             kh_calc = (162.6 * (Qo * mu_o * Bo)) / m_abs
@@ -303,8 +298,6 @@ def perform_analysis(h, Qo, mu_o, Bo, rw, phi, Ct, pwf_final, tp, data_text, dt_
             st.success("`h` is 0, solving for Flow Capacity (kh) instead of k.")
         except Exception as e:
             st.warning(f"Could not calculate Flow Capacity (kh): {e}")
-
-    # Check if we can calculate T (h=0, mu_o=0, but flow > 0)
     elif h == 0 and mu_o == 0 and Qo > 0 and Bo > 0:
         try:
             transmissibility_calc = (162.6 * (Qo * Bo)) / m_abs
@@ -312,56 +305,48 @@ def perform_analysis(h, Qo, mu_o, Bo, rw, phi, Ct, pwf_final, tp, data_text, dt_
             st.success("`h` and `μo` are 0, solving for Transmissibility (kh/μo) instead of k.")
         except Exception as e:
             st.warning(f"Could not calculate Transmissibility: {e}")
-
-    # --- 7. Skin, dP_Skin, FE Calculation (OVERRIDE LOGIC) ---
-    S_calculated = False # Flag
-    S = 0.0 # Initialize S
-
-    # --- NEW: V9.2 Auto-Solve for Pwf ---
-    # Check if we should *calculate* Pwf
-    # This requires S_override, k, and all optionals
+            
+    # --- 8. Skin, dP_Skin, FE Calculation (OVERRIDE LOGIC) ---
+    S_calculated = False 
+    S = 0.0 
+    
     if S_override != 0 and pwf_final == 0 and k > 0 and phi > 0 and Ct > 0 and rw > 0:
         try:
             st.success("Solving for `Pwf (Final Flow P)` based on `S_override`...")
             S = S_override
             results['S'] = S
             S_calculated = True
-
-            # Rearrange the Skin equation to solve for Pwf
+            
             log_term_B = np.log10((k * tp_hr) / (phi * mu_o * Ct * (rw ** 2)))
             A = (S / 1.151) + log_term_B - 3.23
             pwf_final_calc = pi - (A * m_abs)
             results['pwf_final_calc'] = pwf_final_calc
-            pwf_final_to_use = pwf_final_calc # Use this calculated value
-
+            pwf_final_to_use = pwf_final_calc 
+            
         except Exception as e:
             st.warning(f"Could not auto-solve for Pwf: {e}")
-            S_calculated = False # Failed, so we can't proceed
-
-    # --- Standard Skin Calculation ---
-    elif S_override != 0: # User provided S, but not trying to solve for Pwf
+            S_calculated = False 
+            
+    elif S_override != 0: 
         st.info(f"Using user-provided S = {S_override}")
         S = S_override
         results['S'] = S
-        S_calculated = True
+        S_calculated = True 
     else:
-        # Try to calculate S normally
-        # This requires k > 0 and all optionals
         if k > 0 and phi > 0 and Ct > 0 and rw > 0 and pwf_final_to_use > 0:
             try:
                 log_term = np.log10((k * tp_hr) / (phi * mu_o * Ct * (rw ** 2)))
                 S = 1.151 * (((pi - pwf_final_to_use) / m_abs) - log_term + 3.23)
                 results['S'] = S
-                S_calculated = True
+                S_calculated = True 
             except Exception as e:
                 st.warning(f"Could not calculate Skin (S): {e}. Check optional parameters.")
 
-    # Now, calculate dP_skin and FE *if* we have a skin value AND k
     if S_calculated and k > 0 and h > 0 and pwf_final_to_use > 0:
         try:
             dP_skin = (141.2 * (Qo * mu_o * Bo) / (k * h)) * S
             results['dP_skin'] = dP_skin
-
+            
             if (pi - pwf_final_to_use) != 0:
                 FE = (pi - pwf_final_to_use - dP_skin) / (pi - pwf_final_to_use)
                 results['FE'] = FE
@@ -370,132 +355,114 @@ def perform_analysis(h, Qo, mu_o, Bo, rw, phi, Ct, pwf_final, tp, data_text, dt_
         except Exception as e:
             st.warning(f"Could not calculate dP_skin or FE: {e}")
 
-
-    # --- 8. Radius of Investigation (Depends on optionals) ---
+    
+    # --- 9. Radius of Investigation (Depends on optionals) ---
     if k > 0 and phi > 0 and Ct > 0 and mu_o > 0: # mu_o is also needed
         try:
-            # tp is already in minutes, use it directly
             ri = np.sqrt((k * tp) / (5.76e4 * phi * mu_o * Ct))
             results['ri'] = ri
         except Exception as e:
             st.warning(f"Could not calculate Radius of Investigation (ri): {e}")
 
-    # --- 9. Create the Horner Plot (NEW AESTHETICS) ---
+    # --- 10. Create the Horner Plot (NEW AESTHETICS) ---
     fig_horner, ax = plt.subplots(figsize=(10, 7))
     fig_horner.patch.set_facecolor('#ffffff') # Set outer bg to white
     ax.set_facecolor('#f8f9fa') # Set inner plot bg to light gray
 
-    # Plot all data points (semi-transparent blue)
-    ax.scatter(df['horner_time'], df['pwsf'], s=60, color='#007bff', edgecolor='black',
+    ax.scatter(df['horner_time'], df['pwsf'], s=60, color='#007bff', edgecolor='black', 
                linewidths=0.5, label='All DST Data', zorder=5, alpha=0.6)
-
-    # Only plot red MTR dots if MTR was *calculated* (bolder red)
+    
     if fit_df is not None and mtr_info is not None:
-        ax.scatter(fit_df['horner_time'], fit_df['pwsf'], s=90, color='#dc3545',
+        ax.scatter(fit_df['horner_time'], fit_df['pwsf'], s=90, color='#dc3545', 
                    edgecolor='black', linewidths=1.0, label=f"Auto-Detected MTR (n={mtr_info['num_points']})", zorder=6)
-
+    
     ax.set_xscale('log')
     ax.invert_xaxis()
-
-    # DYNAMIC AXIS LOGIC
+    
     min_ht_plot = 1.0
     max_ht_plot = df['horner_time'].max()
-    ax.set_xlim(left=max_ht_plot * 1.5, right=min_ht_plot * 0.9)
+    ax.set_xlim(left=max_ht_plot * 1.5, right=min_ht_plot * 0.9) 
     min_y_plot = df['pwsf'].min()
     max_y_plot = max(df['pwsf'].max(), pi)
     y_padding = (max_y_plot - min_y_plot) * 0.10 # 10% padding
     y_padding = max(y_padding, 20.0) # at least 20 psi
     ax.set_ylim(bottom=min_y_plot - y_padding, top=max_y_plot + y_padding)
 
-    # Plot regression lines
     x_line_log = np.array([np.log10(max_ht_plot * 1.5), 0])
     y_line = pi + m_slope * x_line_log # Uses m_slope (negative)
-
+    
     label_r2 = f"R² = {r_squared:.3f}" if r_squared is not None else "R² = N/A"
-
-    # Bolder MTR line
-    ax.plot(10 ** x_line_log, y_line, color='black',
+    
+    ax.plot(10 ** x_line_log, y_line, color='black', 
             label=f'MTR (m = {m_abs:.2f}, {label_r2})', zorder=4, linewidth=3.0, alpha=0.8)
-    # Bolder, more distinct pi line
-    ax.axhline(pi, color='#28a745', linestyle='--',
+    ax.axhline(pi, color='#28a745', linestyle='--', 
                label=f'Extrapolated $p_i$ = {pi:.1f} psi', linewidth=2.5, zorder=4)
 
     ax.yaxis.tick_right()
     ax.yaxis.set_label_position("right")
     ax.yaxis.set_major_locator(plt.MaxNLocator(nbins=10))
-
-    # Custom gridlines (FIXED: Made more visible)
+    
     ax.grid(which='minor', linestyle=':', linewidth='0.5', color='gray', alpha=0.4)
     ax.grid(which='major', linestyle='-', linewidth='0.8', color='#cccccc', alpha=0.9)
-
+    
     ax.set_xlabel('Horner Time (tp + Δt) / Δt', fontsize=12, fontweight='bold')
     ax.set_ylabel('Shut-in Pressure (Pwsf), psi', fontsize=12, fontweight='bold')
     ax.set_title('Horner Plot Analysis', fontsize=16, fontweight='bold', pad=20)
-
-    # Modern legend
+    
     legend = ax.legend(loc='lower left', frameon=True, framealpha=0.9, facecolor='white', shadow=True)
     legend.get_frame().set_edgecolor('lightgray')
 
-    # Remove all spines (borders)
     ax.spines[['top', 'left', 'right', 'bottom']].set_visible(False)
-
-    # Add a subtle axis line at the bottom (new Y min)
     ax.axhline(min_y_plot - y_padding, color='black', linewidth=1.5, alpha=0.7)
-
+    
     plt.tight_layout()
 
-    # --- 10. Create the Residuals Plot (NEW AESTHETICS) ---
+    # --- 11. Create the Residuals Plot (NEW AESTHETICS) ---
     fig_residuals, ax_res = plt.subplots(figsize=(10, 5))
-    fig_residuals.patch.set_facecolor('#ffffff') # Set outer bg to white
-    ax_res.set_facecolor('#f8f9fa') # Set inner plot bg to light gray
+    fig_residuals.patch.set_facecolor('#ffffff') 
+    ax_res.set_facecolor('#f8f9fa') 
 
-    # Plot points
-    ax_res.scatter(df['horner_time'], df['residual'], s=60, color='#007bff',
+    ax_res.scatter(df['horner_time'], df['residual'], s=60, color='#007bff', 
                    edgecolor='black', linewidths=0.5, label='All Data Residuals', zorder=5, alpha=0.6)
-
+    
     if fit_df is not None and mtr_info is not None:
         mtr_df_res = df.loc[mtr_info['used_rows']]
-        ax_res.scatter(mtr_df_res['horner_time'], mtr_df_res['residual'], s=90, color='#dc3545',
+        ax_res.scatter(mtr_df_res['horner_time'], mtr_df_res['residual'], s=90, color='#dc3545', 
                        edgecolor='black', linewidths=1.0, label='MTR Point Residuals', zorder=6)
-
-    # Plot perfect fit line
+    
     ax_res.axhline(0, color='black', linestyle='--', linewidth=2.0, label='Perfect Fit (Residual = 0)', alpha=0.8)
-
+    
     ax_res.set_xscale('log')
     ax_res.invert_xaxis()
     ax_res.set_xlim(left=max_ht_plot * 1.1, right=min_ht_plot * 0.9)
-
-    # Dynamic Y-axis for residuals
+    
     max_abs_residual = df['residual'].abs().max()
-    # Handle case where residuals are 0 or NaN
     if not np.isfinite(max_abs_residual) or max_abs_residual == 0:
-        max_abs_residual = 1.0 # default value
-    res_padding = max(max_abs_residual * 0.15, 5.0) # 15% padding, min 5 psi
+        max_abs_residual = 1.0 
+    res_padding = max(max_abs_residual * 0.15, 5.0) 
     ax_res.set_ylim(-max_abs_residual - res_padding, max_abs_residual + res_padding)
-
+    
     ax_res.set_xlabel('Horner Time (tp + Δt) / Δt', fontsize=12, fontweight='bold')
     ax_res.set_ylabel('Pressure Residual (psi)\n(Actual - Predicted)', fontsize=12, fontweight='bold')
     ax_res.set_title('MTR Residuals Plot', fontsize=16, fontweight='bold', pad=20)
-
-    # Modern legend
+    
     legend = ax_res.legend(loc='best', frameon=True, framealpha=0.9, facecolor='white', shadow=True)
     legend.get_frame().set_edgecolor('lightgray')
 
-    # Custom gridlines (FIXED: Made more visible)
     ax_res.grid(which='major', linestyle='-', linewidth='0.8', color='#cccccc', alpha=0.9)
     ax_res.grid(which='minor', linestyle=':', linewidth='0.5', color='gray', alpha=0.4)
-
+    
     ax_res.spines[['top', 'right', 'left', 'bottom']].set_visible(False)
-
-    # Add a subtle axis line at the bottom
     ax_res.axhline(-max_abs_residual - res_padding, color='black', linewidth=1.5, alpha=0.7)
 
     plt.tight_layout()
 
-    # --- 11. Return all 5 objects ---
-    # We return the df with the *original* dt column for display
+    # --- 12. Create the Log-Log Derivative Plot (V9.5) ---
+    # <-- ENTIRE PLOTTING BLOCK REMOVED -->
+    
+    # --- 13. Return all 5 objects ---
     df_to_return = df.drop(columns=['dt_calc'])
-    return results, fig_horner, df_to_return, mtr_info, fig_residuals
+    return results, fig_horner, df_to_return, mtr_info, fig_residuals # <-- REMOVED fig_deriv
 
 def get_table_download_link(df):
     """Generate a link to download the processed data as CSV"""
@@ -503,7 +470,7 @@ def get_table_download_link(df):
     df_to_save = df.copy()
     if 'dt_calc' in df_to_save.columns:
         df_to_save = df_to_save.drop(columns=['dt_calc'])
-
+    
     csv = df_to_save.to_csv(index=False)
     b64 = base64.b64encode(csv.encode()).decode()
     href = f'<a href="data:file/csv;base64,{b64}" download="dst_analysis_results.csv">Download processed data as CSV</a>'
@@ -513,17 +480,17 @@ def format_metric(value, unit, format_str=":.2f"):
     """Helper function to format metrics, handling None values."""
     if value is None:
         return "Not Calculated"
-
+    
     # Build the format specifier string, e.g., "{:.2f}"
     format_spec = "{" + format_str + "}"
-
+    
     try:
         # Apply the format
         formatted_value = format_spec.format(value)
     except (ValueError, TypeError):
         # Fallback in case of an unexpected error
         formatted_value = str(value)
-
+        
     return f"{formatted_value} {unit}"
 
 # --- Main Application UI ---
@@ -543,29 +510,31 @@ def main():
     if 'figure' not in st.session_state:
         st.session_state.figure = None
     if 'figure_residuals' not in st.session_state:
-        st.session_state.figure_residuals = None # NEW
+        st.session_state.figure_residuals = None
+    # if 'figure_deriv' not in st.session_state: # <-- REMOVED
+    #     st.session_state.figure_deriv = None
     if 'dataframe' not in st.session_state:
         st.session_state.dataframe = None
     if 'mtr_info' not in st.session_state:
         st.session_state.mtr_info = None
-    if 'mtr_r2_used' not in st.session_state: # NEW
+    if 'mtr_r2_used' not in st.session_state: 
         st.session_state.mtr_r2_used = None
 
     # --- Sidebar for User Inputs ---
     with st.sidebar:
         st.header("📊 Input Parameters")
         with st.form(key='input_form'):
-
+            
             # --- V9.3: Combined Section ---
             st.subheader("Reservoir & Test Properties")
             st.caption("Enter all known values. Leave at 0 to auto-calculate.")
-
+            
             col1, col2 = st.columns(2)
             with col1:
                 h = st.number_input("Pay Thickness, h (ft)", value=10.0, min_value=0.0, format="%.2f", step=1.0,
                                     help="Essential for k. If 0, will solve for kh.")
                 Qo = st.number_input("Flow Rate, Qo (bbl/d)", value=135.0, min_value=0.0, format="%.2f", step=1.0,
-                                     help="Essential for k and kh.")
+                                     help="Essential for k and kh. If 0, calculation will fail.")
                 mu_o = st.number_input("Viscosity, μo (cp)", value=1.5, min_value=0.0, format="%.2f", step=0.1,
                                        help="Essential for k and kh. If 0, will solve for T.")
                 Bo = st.number_input("FVF, Bo (RB/STB)", value=1.15, min_value=0.0, format="%.3f", step=0.01,
@@ -585,7 +554,7 @@ def main():
                                               help="Override: Leave at 0 to auto-extrapolate.")
                 k_override = st.number_input("Permeability 'k' (md)", value=0.0, min_value=0.0, format="%.2f",
                                              help="Override: Leave at 0 to auto-calculate from m.")
-                S_override = st.number_input("Skin 'S'", value=0.0, format="%.2f",
+                S_override = st.number_input("Skin 'S'", value=0.0, format="%.2f", 
                                             help="Override: Enter non-zero value. If Pwf=0, will solve for Pwf.")
 
             st.markdown("---")
@@ -593,7 +562,7 @@ def main():
             tp = st.number_input("Total Flow Time, tp (min)", value=60.0, min_value=0.1, format="%.1f",
                                 help="The *total* duration of the flow period (tp) in minutes.",
                                 step=1.0)
-
+            
             # --- NEW: MTR Sensitivity Slider ---
             mtr_sensitivity = st.slider(
                 "MTR Detection Sensitivity (Min R²)",
@@ -637,22 +606,24 @@ def main():
     if submitted:
         # Clear previous run's warnings
         st.query_params.clear() # <-- UPDATED from st.experimental_set_query_params()
-
+        
         with st.spinner("Auto-detecting MTR and performing analysis..."):
+            # <-- REMOVED fig_deriv from return tuple -->
             results, figure, dataframe, mtr_info, fig_residuals = perform_analysis(
                 h, Qo, mu_o, Bo, rw, phi, Ct, pwf_final, tp, data_text,
                 dt_unit, # <-- Pass dt_unit
                 m_override, pi_override, k_override, S_override, # Pass overrides
                 mtr_sensitivity # <-- Pass sensitivity
             )
-
+            
             # Store results regardless of success, to show partials
             st.session_state.results = results
             st.session_state.figure = figure
             st.session_state.figure_residuals = fig_residuals
+            # st.session_state.figure_deriv = fig_deriv # <-- REMOVED
             st.session_state.dataframe = dataframe
             st.session_state.mtr_info = mtr_info
-
+            
             if results['m'] is not None:
                 st.success("Analysis completed!")
             else:
@@ -673,7 +644,7 @@ def main():
             st.markdown('<div class="result-box">', unsafe_allow_html=True)
             st.metric("Horner Slope 'm'", format_metric(results['m'], "psi/cycle", ":.2f"))
             st.metric("Initial Reservoir Pressure, pᵢ", format_metric(results['pi'], "psi", ":.1f"))
-
+            
             # --- NEW: Modular k, kh, T display ---
             if results['k'] is not None:
                 st.metric("Formation Permeability, k", format_metric(results['k'], "md", ":.2f"))
@@ -681,21 +652,21 @@ def main():
                 st.metric("Flow Capacity, kh (CALCULATED)", format_metric(results['kh_calc'], "md-ft", ":.1f"))
             if results['transmissibility_calc'] is not None:
                 st.metric("Transmissibility, T (CALCULATED)", format_metric(results['transmissibility_calc'], "md-ft/cp", ":.1f"))
-
+                
             st.metric("Skin Factor, S", format_metric(results['S'], "", ":.2f"))
-
+            
             # --- NEW: Show calculated Pwf ---
             if results['pwf_final_calc'] is not None:
                 st.metric("Final Flow P, Pwf (CALCULATED)", format_metric(results['pwf_final_calc'], "psi", ":.1f"))
-
+            
             st.metric("Pressure Drop (Skin), ΔP_skin", format_metric(results['dP_skin'], "psi", ":.1f"))
             st.metric("Flow Efficiency, FE", format_metric(results['FE'], "", ":.3f"))
             st.metric("Radius of Investigation, rᵢ", format_metric(results['ri'], "ft", ":.1f"))
-
+            
             r2_val = results['r_squared']
             r2_display = f"{r2_val:.4f}" if r2_val is not None else "N/A (Overridden)"
             st.metric("Regression R-squared", r2_display)
-
+            
             st.markdown('</div>', unsafe_allow_html=True)
 
             # MTR Info
@@ -731,6 +702,7 @@ def main():
 
     with col2:
         st.header("Analysis Outputs")
+        # --- NEW: Removed Tab 3 ---
         tab1, tab2, tab3, tab4, tab5 = st.tabs([
             "📊 Horner Plot",
             "📉 Residuals Plot",
@@ -743,7 +715,7 @@ def main():
                 st.pyplot(st.session_state.figure, dpi=300)
             else:
                 st.info("The Horner plot will appear here after analysis")
-
+        
         with tab2:
             if st.session_state.figure_residuals:
                 st.pyplot(st.session_state.figure_residuals, dpi=300)
@@ -756,13 +728,15 @@ def main():
             else:
                 st.info("The residuals plot will appear here after analysis")
 
-        with tab3:
+        # --- NEW: Removed Tab 3 Content ---
+
+        with tab3: # This is the old tab 4
             if st.session_state.dataframe is not None:
                 st.subheader("Processed Data")
                 df = st.session_state.dataframe.copy()
                 mtr_rows = st.session_state.mtr_info['used_rows'] if st.session_state.mtr_info else []
                 df['MTR'] = ["✅" if i in df.index and mtr_rows and i in mtr_rows else "" for i in df.index]
-
+                
                 columns_order = ['dt', 'pwsf', 'horner_time', 'log_horner_time', 'predicted_pwsf', 'residual', 'MTR']
                 # Ensure all columns exist before reordering
                 df_cols = [col for col in columns_order if col in df.columns]
@@ -780,16 +754,16 @@ def main():
                 st.markdown(get_table_download_link(df), unsafe_allow_html=True)
             else:
                 st.info("The processed data table will appear here")
-
-        with tab4:
+        
+        with tab4: # This is the old tab 5
             st.subheader("Analysis Methodology (Visual Flowchart)")
             st.markdown("---")
-
+            
             # --- Visual Flowchart using Graphviz ---
             try:
                 dot = graphviz.Digraph(comment='DST Analysis Flow Chart')
                 dot.attr(rankdir='TB', bgcolor='transparent', newrank='true') # Top-to-Bottom layout
-
+                
                 # Define node styles
                 node_style = {'shape': 'box', 'style': 'rounded,filled', 'fillcolor': '#f0f2f6', 'fontname': 'Inter'}
                 start_style = {'shape': 'box', 'style': 'rounded,filled', 'fillcolor': '#e6f3ff', 'fontname': 'Inter'}
@@ -799,17 +773,17 @@ def main():
                 manual_style = {'shape': 'box', 'style': 'rounded,filled', 'fillcolor': '#f0e6ff', 'fontname': 'Inter'}
                 calc_style = {'shape': 'box', 'style': 'rounded,filled', 'fillcolor': '#e6fff9', 'fontname': 'Inter'}
 
-
-                # Define nodes
+                
+                # --- Flowchart (V9.4) ---
                 dot.node('A', '1. Start: Inputs & Data', **start_style)
                 dot.node('B', '2. Convert Δt to Minutes (if needed)', **node_style)
                 dot.node('C', '3. Calc & Sort Horner Time', **node_style)
-
+                
                 dot.node('D', '4. m & pi Overridden?', **decision_style)
                 dot.node('D_yes', 'Use User-Provided m & pᵢ', **manual_style)
                 dot.node('D_no', 'Run Smart MTR Detection\n(V9.1 "Best Segment" Logic)', **brain_style)
                 dot.node('D_calc', 'Get m & pᵢ from MTR', **node_style)
-
+                
                 dot.node('E', '5. k Overridden?', **decision_style)
                 dot.node('E_yes', 'Use User-Provided k', **manual_style)
                 dot.node('E_no', '6. All Essentials?\n(h, Qo, μ, Bo > 0)', **decision_style)
@@ -835,32 +809,32 @@ def main():
                 dot.edge('A', 'B')
                 dot.edge('B', 'C')
                 dot.edge('C', 'D')
-
+                
                 dot.edge('D', 'D_yes', label='  Yes  ')
                 dot.edge('D', 'D_no', label='  No  ')
                 dot.edge('D_no', 'D_calc')
-
+                
                 dot.edge('D_yes', 'E')
                 dot.edge('D_calc', 'E')
-
+                
                 dot.edge('E', 'E_yes', label='  Yes  ')
                 dot.edge('E', 'E_no', label='  No  ')
                 dot.edge('E_no', 'E_no_yes', label='  Yes  ')
                 dot.edge('E_no', 'E_no_no', label='  No  ')
-
+                
                 dot.edge('E_no_no', 'E_no_no_yes', label='  Yes  ')
                 dot.edge('E_no_no', 'E_no_no_no', label='  No  ')
-
+                
                 dot.edge('E_no_no_no', 'E_no_no_no_yes', label='  Yes  ')
                 dot.edge('E_no_no_no', 'E_no_no_no_no', label='  No  ')
-
+                
                 # Edges leading to Skin calculation
                 dot.edge('E_yes', 'F')
                 dot.edge('E_no_yes', 'F')
                 dot.edge('E_no_no_yes', 'H') # Skip Skin if k is unknown
                 dot.edge('E_no_no_no_yes', 'H') # Skip Skin
                 dot.edge('E_no_no_no_no', 'H') # Skip Skin
-
+                
                 dot.edge('F', 'F_yes', label='  Yes  ')
                 dot.edge('F', 'F_no', label='  No  ')
                 dot.edge('F_yes', 'G')
@@ -871,7 +845,7 @@ def main():
 
                 dot.edge('G_yes', 'H')
                 dot.edge('G_no', 'H')
-
+                
                 dot.edge('H', 'I')
 
                 # Render the chart
@@ -890,11 +864,17 @@ def main():
             st.subheader("Formula Key")
             st.markdown("**Step 3: Horner Time**")
             st.latex(r"\text{Horner Time} = \frac{t_p + \Delta t}{\Delta t} \quad (\text{units must be consistent})")
+            
+            # --- V9.4.1: Added formula from user ---
+            st.markdown("**Step 4: Horner Slope (m)**")
+            st.latex(r"m = \frac{P_{ws_1} - P_{ws_{10}}}{\log(10) - \log(1)}")
+            st.caption("This is the 'by hand' calculation per log cycle. The app uses linear regression on the MTR points for a more accurate value.")
+
             st.markdown("**Step 5-8: Permeability (k), Flow Capacity (kh), Transmissibility (T)**")
             st.latex(r"k = \frac{162.6 \cdot Q_o \cdot \mu_o \cdot B_o}{m \cdot h} \quad (\text{if } h, Q_o, \mu_o, B_o > 0)")
             st.latex(r"kh = \frac{162.6 \cdot Q_o \cdot \mu_o \cdot B_o}{m} \quad (\text{if } h=0)")
             st.latex(r"T = \frac{kh}{\mu_o} = \frac{162.6 \cdot Q_o \cdot B_o}{m} \quad (\text{if } h=0, \mu_o=0)")
-
+            
             st.markdown("**Step 9-10: Skin (S) & Pwf**")
             st.latex(r"S = 1.151 \left[ \left(\frac{p_i - p_{wf}}{m}\right) - \log\left(\frac{k \cdot t_{p(hr)}}{\phi \cdot \mu_o \cdot C_t \cdot r_w^2}\right) + 3.23 \right]")
             st.caption("This equation is rearranged to solve for `Pwf` if `S` is provided.")
@@ -904,7 +884,7 @@ def main():
             st.latex(r"r_i = \sqrt{\frac{k \cdot t_p}{57600 \cdot \phi \cdot \mu_o \cdot C_t}}")
 
 
-        with tab5:
+        with tab5: # This is the old tab 6
             st.subheader("Key Formulas")
             st.latex(r"p_{ws} = p_i - m \log\left(\frac{t_p + \Delta t}{\Delta t}\right)")
             st.caption("Horner Equation (m = slope)")
