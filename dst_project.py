@@ -163,6 +163,8 @@ def find_image_path(keywords):
 def validate_pressure_data(df):
     """Validate pressure buildup data for physical consistency"""
     warnings = []
+    if len(df) < 2: return warnings
+
     pressure_diff = df['pwsf'].diff()
     decreasing_points = (pressure_diff < -5).sum()
 
@@ -629,314 +631,319 @@ def format_metric(value, unit, format_str=":.2f"):
 
 # --- Main Application ---
 def main():
-    # --- HEADER SECTION ---
-    # Render header inside a container div with forced light styling for robustness
-    st.markdown('<div class="header-card">', unsafe_allow_html=True)
+    try:
+        # --- HEADER SECTION ---
+        # Render header inside a container div with forced light styling for robustness
+        st.markdown('<div class="header-card">', unsafe_allow_html=True)
 
-    # Update layout to accommodate the new image 'a.jpg'
-    # Structure: Eng Logo | Anniversary Logo (a.jpg) | Title Text | Other Logo (Yom)
-    c1, c2, c3, c4 = st.columns([1, 1, 4, 1])
+        # Update layout to accommodate the new image 'a.jpg'
+        # Structure: Eng Logo | Anniversary Logo (a.jpg) | Title Text | Other Logo (Yom)
+        c1, c2, c3, c4 = st.columns([1, 1, 4, 1])
 
-    with c1:
-        eng_path = find_image_path(['eng'])
-        if eng_path:
-            st.image(eng_path, use_container_width=True)
+        with c1:
+            eng_path = find_image_path(['eng'])
+            if eng_path:
+                st.image(eng_path, use_container_width=True)
 
-    with c2:
-        # Explicitly look for 'a.jpg' or 'a.png' as requested
-        if os.path.exists("a.jpg"):
-            st.image("a.jpg", use_container_width=True)
-        elif os.path.exists("a.png"):
-            st.image("a.png", use_container_width=True)
-        else:
-            # Fallback search if exact name differs but keyword matches
-            a_path = find_image_path(['anniversary', '22'])
-            if a_path:
-                 st.image(a_path, use_container_width=True)
+        with c2:
+            # Explicitly look for 'a.jpg' or 'a.png' as requested
+            if os.path.exists("a.jpg"):
+                st.image("a.jpg", use_container_width=True)
+            elif os.path.exists("a.png"):
+                st.image("a.png", use_container_width=True)
+            else:
+                # Fallback search if exact name differs but keyword matches
+                a_path = find_image_path(['anniversary', '22'])
+                if a_path:
+                     st.image(a_path, use_container_width=True)
 
-    with c3:
-        st.markdown('<p class="uni-title">University of Kirkuk | College of Engineering</p>', unsafe_allow_html=True)
-        st.markdown('<p class="dept-title">Petroleum Engineering Department</p>', unsafe_allow_html=True)
-        st.markdown('<h1>DST Horner Plot Analyst</h1>', unsafe_allow_html=True)
+        with c3:
+            st.markdown('<p class="uni-title">University of Kirkuk | College of Engineering</p>', unsafe_allow_html=True)
+            st.markdown('<p class="dept-title">Petroleum Engineering Department</p>', unsafe_allow_html=True)
+            st.markdown('<h1>DST Horner Plot Analyst</h1>', unsafe_allow_html=True)
 
-    with c4:
-        logo_path = find_image_path(['جامعة', 'bank', 'logo', 'day', 'يوم'])
-        if logo_path:
-            st.image(logo_path, use_container_width=True)
-
-    st.markdown('</div>', unsafe_allow_html=True)
-
-    # --- DEVELOPER BANNER ---
-    st.markdown(
-        '<div class="dev-banner">'
-        'Developed by: Bilal Rabah & Omar Yilmaz  |  Supervised by: Lec. Mohammed Yashar'
-        '</div>',
-        unsafe_allow_html=True
-    )
-
-    # --- Initialize session state ---
-    if 'results' not in st.session_state: st.session_state.results = None
-    if 'figure' not in st.session_state: st.session_state.figure = None
-    if 'figure_residuals' not in st.session_state: st.session_state.figure_residuals = None
-    if 'dataframe' not in st.session_state: st.session_state.dataframe = None
-    if 'mtr_info' not in st.session_state: st.session_state.mtr_info = None
-    if 'mtr_r2_used' not in st.session_state: st.session_state.mtr_r2_used = None
-    if 'validation_warnings' not in st.session_state: st.session_state.validation_warnings = []
-    if 'input_params' not in st.session_state: st.session_state.input_params = {}
-
-    # --- SIDEBAR INPUTS ---
-    with st.sidebar:
-        st.title("⚙️ Configuration")
-
-        with st.expander("📄 About & Help", expanded=False):
-            st.markdown("""
-            **DST Horner Analyst**
-            
-            A professional tool for interpreting Drill Stem Test (DST) pressure buildup data using the Horner approximation method.
-            
-            **Features:**
-            * Automatic Middle Time Region (MTR) detection
-            * Calculation of Permeability, Skin, and Flow Efficiency
-            * Quality control checks
-            
-            **Authors:** Bilal Rabah & Omar Yilmaz
-            """)
-
-        st.markdown("---")
-        st.header("1. Data Input")
-
-        example_choice = st.selectbox(
-            "Load Example Dataset",
-            ["None", "Typical Well", "Damaged Well", "Stimulated Well"],
-            help="Load pre-configured example data"
-        )
-
-        if example_choice == "Typical Well":
-            default_h, default_Qo, default_mu = 10.0, 135.0, 1.5
-            default_data = "5, 965\n10, 1215\n15, 1405\n20, 1590\n25, 1685\n30, 1725\n35, 1740\n40, 1753\n45, 1765"
-        elif example_choice == "Damaged Well":
-            default_h, default_Qo, default_mu = 15.0, 85.0, 2.0
-            default_data = "10, 1200\n20, 1450\n30, 1600\n40, 1700\n50, 1760\n60, 1800\n70, 1825\n80, 1840"
-        elif example_choice == "Stimulated Well":
-            default_h, default_Qo, default_mu = 12.0, 250.0, 1.2
-            default_data = "5, 1100\n10, 1300\n15, 1425\n20, 1510\n25, 1565\n30, 1600\n35, 1620\n40, 1635"
-        else:
-            default_h, default_Qo, default_mu = 10.0, 135.0, 1.5
-            default_data = "5, 965\n10, 1215\n15, 1405\n20, 1590\n25, 1685\n30, 1725\n35, 1740\n40, 1753\n45, 1765"
-
-        with st.form(key='input_form'):
-            dt_unit = st.radio("Time Unit for Δt", ("minutes", "hours"), horizontal=True)
-            data_text = st.text_area("Shut-in Data (Δt, Pwsf)", value=default_data, height=150, help="Paste data here. Format: Time, Pressure")
-
-            st.markdown("---")
-            st.header("2. Reservoir Parameters")
-
-            col1, col2 = st.columns(2)
-            with col1:
-                h = st.number_input("h (ft)", value=default_h, format="%.2f", help="Pay Thickness")
-                Qo = st.number_input("Qo (bbl/d)", value=default_Qo, format="%.2f", help="Oil Flow Rate")
-                mu_o = st.number_input("μo (cp)", value=default_mu, format="%.2f", help="Oil Viscosity")
-                Bo = st.number_input("Bo (RB/STB)", value=1.15, format="%.3f", help="Formation Volume Factor")
-            with col2:
-                rw = st.number_input("rw (ft)", value=0.333, format="%.3f", help="Wellbore Radius")
-                phi = st.number_input("φ (porosity)", value=0.10, format="%.3f", help="Porosity (fraction)")
-                Ct = st.number_input("Ct (psi⁻¹)", value=8.4e-6, format="%.2e", help="Total Compressibility")
-                pwf_final = st.number_input("Pwf (psi)", value=350.0, format="%.1f", help="Final Flowing Pressure")
-
-            st.markdown("---")
-            st.header("3. Test Settings")
-            tp = st.number_input("Producing Time tp (min)", value=60.0, format="%.1f")
-
-            with st.expander("Advanced Settings"):
-                mtr_sensitivity = st.slider("MTR Detection Sensitivity", 0.950, 1.000, 0.995, 0.001, format="%.3f", help="Higher values require straighter lines")
-                m_override = st.number_input("Override Slope (m)", value=0.0, format="%.2f")
-                pi_override = st.number_input("Override Pi (psi)", value=0.0, format="%.1f")
-                k_override = st.number_input("Override Permeability (k)", value=0.0, format="%.2f")
-                S_override = st.number_input("Override Skin (S)", value=0.0, format="%.2f")
-
-            submitted = st.form_submit_button("🚀 Run Analysis", use_container_width=True)
-
-    if submitted:
-        with st.spinner("🔍 Analyzing pressure data..."):
-            st.session_state.input_params = {
-                'h': h, 'Qo': Qo, 'mu_o': mu_o, 'Bo': Bo, 'rw': rw,
-                'phi': phi, 'Ct': Ct, 'pwf_final': pwf_final, 'tp': tp, 'dt_unit': dt_unit
-            }
-            results, figure, dataframe, mtr_info, fig_residuals, validation_warnings = perform_analysis(
-                h, Qo, mu_o, Bo, rw, phi, Ct, pwf_final, tp, data_text,
-                dt_unit, m_override, pi_override, k_override, S_override, mtr_sensitivity
-            )
-            st.session_state.results = results
-            st.session_state.figure = figure
-            st.session_state.figure_residuals = fig_residuals
-            st.session_state.dataframe = dataframe
-            st.session_state.mtr_info = mtr_info
-            st.session_state.validation_warnings = validation_warnings
-
-    if st.session_state.validation_warnings:
-        with st.expander("⚠️ Data Quality Warnings", expanded=True):
-            for warning in st.session_state.validation_warnings: st.markdown(f"- {warning}")
-
-    # --- MAIN CONTENT ---
-    if st.session_state.results:
-        # Use Full Width Container for everything now
-
-        st.markdown("### 📈 Analysis Results")
-        results = st.session_state.results
-        mtr_info = st.session_state.mtr_info
-
-        # SINGLE COLUMN METRICS (As requested)
-        # We use a white container and list them clearly
-        st.markdown('<div class="result-container">', unsafe_allow_html=True)
-
-        # To make it a "column" but still look good, we can use st.columns(1) effectively
-        # or just list them. But standard st.metric in one column takes a lot of vertical space.
-        # The user asked for "make this a coloume". This usually means vertical stacking.
-
-        st.metric("Slope 'm'", format_metric(results['m'], "psi/cycle", ":.2f"), help="Horner semi-log slope")
-        st.metric("Initial Pressure (p*)", format_metric(results['pi'], "psi", ":.1f"), help="Extrapolated pressure at infinite shut-in time")
-
-        if results['k'] is not None: st.metric("Permeability (k)", format_metric(results['k'], "md", ":.2f"))
-        if results['kh_calc'] is not None: st.metric("Flow Capacity (kh)", format_metric(results['kh_calc'], "md-ft", ":.1f"))
-
-        if results['transmissibility_calc'] is not None:
-            st.metric("Transmissibility", format_metric(results['transmissibility_calc'], "md-ft/cp", ":.1f"))
-
-        st.metric("Skin Factor (S)", format_metric(results['S'], "", ":.2f"))
-        st.metric("Flow Efficiency (FE)", format_metric(results['FE'], "", ":.3f"))
-        st.metric("Damage Ratio (DR)", format_metric(results['DR'], "", ":.3f"))
-        st.metric("Productivity Index (PI)", format_metric(results['PI'], "bbl/d/psi", ":.3f"))
-        st.metric("Radius of Inv. (ri)", format_metric(results['ri'], "ft", ":.1f"))
-
-        r2_display = f"{results['r_squared']:.4f}" if results['r_squared'] is not None else "N/A"
-        st.metric("Fit Quality (R²)", r2_display)
+        with c4:
+            logo_path = find_image_path(['جامعة', 'bank', 'logo', 'day', 'يوم'])
+            if logo_path:
+                st.image(logo_path, use_container_width=True)
 
         st.markdown('</div>', unsafe_allow_html=True)
 
-        if mtr_info:
-            r2_info = st.session_state.mtr_r2_used
-            st.info(f"**Auto-MTR:** {mtr_info['num_points']} points used. Range: {mtr_info['end_dt_orig']:.2f} to {mtr_info['start_dt_orig']:.2f} {st.session_state.input_params.get('dt_unit', 'min')}")
-        elif m_override > 0:
-            st.info(f"**Manual Override:** Analysis forced with m = {m_override}")
+        # --- DEVELOPER BANNER ---
+        st.markdown(
+            '<div class="dev-banner">'
+            'Developed by: Bilal Rabah & Omar Yilmaz  |  Supervised by: Lec. Mohammed Yashar'
+            '</div>',
+            unsafe_allow_html=True
+        )
 
-        st.subheader("📋 Interpretation")
-        if results['S'] is not None:
-            if results['S'] < -3: skin_interp, color = "✅ Highly stimulated well (Excellent)", "success"
-            elif results['S'] < 0: skin_interp, color = "✅ Stimulated well (Good)", "success"
-            elif results['S'] < 3: skin_interp, color = "✅ Undamaged well (Normal)", "info"
-            elif results['S'] < 10: skin_interp, color = "⚠️ Damaged well (Moderate)", "warning"
-            else: skin_interp, color = "❌ Severely damaged well (High)", "error"
+        # --- Initialize session state ---
+        if 'results' not in st.session_state: st.session_state.results = None
+        if 'figure' not in st.session_state: st.session_state.figure = None
+        if 'figure_residuals' not in st.session_state: st.session_state.figure_residuals = None
+        if 'dataframe' not in st.session_state: st.session_state.dataframe = None
+        if 'mtr_info' not in st.session_state: st.session_state.mtr_info = None
+        if 'mtr_r2_used' not in st.session_state: st.session_state.mtr_r2_used = None
+        if 'validation_warnings' not in st.session_state: st.session_state.validation_warnings = []
+        if 'input_params' not in st.session_state: st.session_state.input_params = {}
 
-            msg = f"**Skin Factor ({results['S']:.2f}):** {skin_interp}"
-            if color == "success": st.success(msg)
-            elif color == "warning": st.warning(msg)
-            elif color == "error": st.error(msg)
-            else: st.info(msg)
+        # --- SIDEBAR INPUTS ---
+        with st.sidebar:
+            st.title("⚙️ Configuration")
 
-        st.markdown("---")
-        st.subheader("📥 Export Reports")
-        if st.session_state.input_params:
-            # Text Report
-            report_text = export_results_to_txt(results, mtr_info, st.session_state.input_params)
-            b64_report = base64.b64encode(report_text.encode()).decode()
-            href_report = f'<a href="data:text/plain;base64,{b64_report}" download="DST_Report_{datetime.now().strftime("%Y%m%d_%H%M%S")}.txt" style="text-decoration:none; background-color:#f0f2f6; padding:8px; border-radius:5px; display:block; text-align:center; margin-bottom:10px;">📄 Download Text Report</a>'
-            st.markdown(href_report, unsafe_allow_html=True)
+            with st.expander("📄 About & Help", expanded=False):
+                st.markdown("""
+                **DST Horner Analyst**
+                
+                A professional tool for interpreting Drill Stem Test (DST) pressure buildup data using the Horner approximation method.
+                
+                **Features:**
+                * Automatic Middle Time Region (MTR) detection
+                * Calculation of Permeability, Skin, and Flow Efficiency
+                * Quality control checks
+                
+                **Authors:** Bilal Rabah & Omar Yilmaz
+                """)
 
-            # Excel Report
-            excel_data = generate_excel_download(results, mtr_info, st.session_state.input_params, st.session_state.dataframe)
-            if excel_data:
-                b64_excel = base64.b64encode(excel_data).decode()
-                href_excel = f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64_excel}" download="DST_Analysis_{datetime.now().strftime("%Y%m%d")}.xlsx" style="text-decoration:none; background-color:#28a745; color:white; padding:8px; border-radius:5px; display:block; text-align:center;">📊 Download Excel Report</a>'
-                st.markdown(href_excel, unsafe_allow_html=True)
+            st.markdown("---")
+            st.header("1. Data Input")
 
-            with st.expander("📋 Quick Copy"):
-                copy_to_clipboard_button(report_text, "Copy Report")
+            example_choice = st.selectbox(
+                "Load Example Dataset",
+                ["None", "Typical Well", "Damaged Well", "Stimulated Well"],
+                help="Load pre-configured example data"
+            )
 
-        # --- FULL WIDTH PLOTS BELOW RESULTS ---
-        st.markdown("---")
-        st.markdown("### 📊 Analysis Plots")
-        tab1, tab2, tab3, tab4, tab5 = st.tabs(["📊 Horner Plot", "📉 Residuals", "📥 Data Table", "⚙️ Methodology", "🧪 Formulas"])
+            if example_choice == "Typical Well":
+                default_h, default_Qo, default_mu = 10.0, 135.0, 1.5
+                default_data = "5, 965\n10, 1215\n15, 1405\n20, 1590\n25, 1685\n30, 1725\n35, 1740\n40, 1753\n45, 1765"
+            elif example_choice == "Damaged Well":
+                default_h, default_Qo, default_mu = 15.0, 85.0, 2.0
+                default_data = "10, 1200\n20, 1450\n30, 1600\n40, 1700\n50, 1760\n60, 1800\n70, 1825\n80, 1840"
+            elif example_choice == "Stimulated Well":
+                default_h, default_Qo, default_mu = 12.0, 250.0, 1.2
+                default_data = "5, 1100\n10, 1300\n15, 1425\n20, 1510\n25, 1565\n30, 1600\n35, 1620\n40, 1635"
+            else:
+                default_h, default_Qo, default_mu = 10.0, 135.0, 1.5
+                default_data = "5, 965\n10, 1215\n15, 1405\n20, 1590\n25, 1685\n30, 1725\n35, 1740\n40, 1753\n45, 1765"
 
-        with tab1:
-            if st.session_state.figure:
-                st.pyplot(st.session_state.figure, dpi=300)
-                st.markdown(get_plot_download_link(st.session_state.figure, "Horner_Plot.png"), unsafe_allow_html=True)
+            with st.form(key='input_form'):
+                dt_unit = st.radio("Time Unit for Δt", ("minutes", "hours"), horizontal=True)
+                data_text = st.text_area("Shut-in Data (Δt, Pwsf)", value=default_data, height=150, help="Paste data here. Format: Time, Pressure")
 
-        with tab2:
-            if st.session_state.figure_residuals:
-                st.pyplot(st.session_state.figure_residuals, dpi=300)
-                st.markdown(get_plot_download_link(st.session_state.figure_residuals, "Residuals_Plot.png"), unsafe_allow_html=True)
-                st.info("Residuals show the deviation of data points from the straight-line fit. Random scatter indicates a good fit.")
+                st.markdown("---")
+                st.header("2. Reservoir Parameters")
 
-        with tab3:
-            if st.session_state.dataframe is not None:
-                st.subheader("Processed Data")
-                df = st.session_state.dataframe.copy()
-                mtr_rows = st.session_state.mtr_info['used_rows'] if st.session_state.mtr_info else []
-                df['MTR'] = ["✅" if i in df.index and mtr_rows and i in mtr_rows else "" for i in df.index]
-                cols = ['dt', 'pwsf', 'horner_time', 'log_horner_time', 'predicted_pwsf', 'residual', 'MTR']
-                df_display = df[[c for c in cols if c in df.columns]]
-                st.dataframe(df_display.style.format({'dt':'{:.2f}','pwsf':'{:.1f}','horner_time':'{:.2f}','log_horner_time':'{:.3f}','predicted_pwsf':'{:.1f}','residual':'{:.2f}'}), use_container_width=True)
-                st.markdown(get_table_download_link(df), unsafe_allow_html=True)
+                col1, col2 = st.columns(2)
+                with col1:
+                    h = st.number_input("h (ft)", value=default_h, format="%.2f", help="Pay Thickness")
+                    Qo = st.number_input("Qo (bbl/d)", value=default_Qo, format="%.2f", help="Oil Flow Rate")
+                    mu_o = st.number_input("μo (cp)", value=default_mu, format="%.2f", help="Oil Viscosity")
+                    Bo = st.number_input("Bo (RB/STB)", value=1.15, format="%.3f", help="Formation Volume Factor")
+                with col2:
+                    rw = st.number_input("rw (ft)", value=0.333, format="%.3f", help="Wellbore Radius")
+                    phi = st.number_input("φ (porosity)", value=0.10, format="%.3f", help="Porosity (fraction)")
+                    Ct = st.number_input("Ct (psi⁻¹)", value=8.4e-6, format="%.2e", help="Total Compressibility")
+                    pwf_final = st.number_input("Pwf (psi)", value=350.0, format="%.1f", help="Final Flowing Pressure")
 
-        with tab4:
-            st.markdown("""
-            ### Analysis Methodology
-            
-            **1. Horner Time**
-            The analysis uses the superposition time function (Horner time) to linearize the pressure buildup equation:
-            $HT = (t_p + \Delta t) / \Delta t$
-            
-            **2. Smart MTR Detection**
-            This application uses an advanced algorithm to identify the **Middle Time Region (MTR)**—the straight-line portion of the semi-log plot representing infinite-acting radial flow.
-            * **Scanning:** Iterates through all valid sub-segments of the data.
-            * **Criteria:** Looks for the *longest* continuous segment with a linearity coefficient ($R^2$) > 0.995.
-            * **Fallback:** If data is noisy, it gracefully degrades to finding the best available statistical fit.
-            
-            **3. Parameter Estimation**
-            * **Permeability (k):** Calculated from the slope ($m$) of the MTR.
-            * **Skin (S):** Calculated using the intercept ($p_{1hr}$) at Horner Time = 1.
-            """)
+                st.markdown("---")
+                st.header("3. Test Settings")
+                tp = st.number_input("Producing Time tp (min)", value=60.0, format="%.1f")
 
-        with tab5:
-            st.subheader("Key Formulas")
-            st.markdown("**Slope (m):**")
-            st.latex(r"m = \frac{p_{ws_2} - p_{ws_1}}{\log(HT_2) - \log(HT_1)}")
-            st.markdown("**Horner Equation:**")
-            st.latex(r"p_{ws} = p_i - m \log\left(\frac{t_p + \Delta t}{\Delta t}\right)")
-            st.markdown("**Permeability (k):**")
-            st.latex(r"k = \frac{162.6 \cdot Q_o \cdot \mu_o \cdot B_o}{m \cdot h}")
-            st.markdown("**Skin Factor (S):**")
-            st.latex(r"S = 1.151 \left[ \left(\frac{p_i - p_{wf}}{m}\right) - \log\left(\frac{k \cdot t_{p(hr)}}{\phi \cdot \mu_o \cdot C_t \cdot r_w^2}\right) + 3.23 \right]")
-            st.markdown("**Pressure Drop (Skin):**")
-            st.latex(r"\Delta P_{skin} = \frac{141.2 \cdot Q_o \cdot \mu_o \cdot B_o}{k \cdot h} \cdot S")
-            st.markdown("**Flow Efficiency (FE):**")
-            st.latex(r"FE = \frac{p_i - p_{wf} - \Delta p_{skin}}{p_i - p_{wf}}")
-            st.markdown("**Damage Ratio (DR):**")
-            st.latex(r"DR = \frac{1}{FE} = \frac{p_i - p_{wf}}{p_i - p_{wf} - \Delta p_{skin}}")
-            st.markdown("**Productivity Index (PI):**")
-            st.latex(r"PI = \frac{Q_o}{p_i - p_{wf}}")
-            st.markdown("**Radius of Investigation (ri):**")
-            st.latex(r"r_i = \sqrt{\frac{k \cdot t_p}{57600 \cdot \phi \cdot \mu_o \cdot C_t}}")
-    else:
-        # Empty state
-        st.info("👈 Please load data and click **Run Analysis** in the sidebar to begin.")
+                with st.expander("Advanced Settings"):
+                    mtr_sensitivity = st.slider("MTR Detection Sensitivity", 0.950, 1.000, 0.995, 0.001, format="%.3f", help="Higher values require straighter lines")
+                    m_override = st.number_input("Override Slope (m)", value=0.0, format="%.2f")
+                    pi_override = st.number_input("Override Pi (psi)", value=0.0, format="%.1f")
+                    k_override = st.number_input("Override Permeability (k)", value=0.0, format="%.2f")
+                    S_override = st.number_input("Override Skin (S)", value=0.0, format="%.2f")
 
-        # Show a placeholder image or guide
-        col1, col2, col3 = st.columns([1, 2, 1])
-        with col2:
-            st.markdown("""
-            ### Welcome to DST Horner Analyst
-            
-            This tool helps you interpret pressure buildup tests quickly and accurately.
-            
-            **Getting Started:**
-            1.  Select an **Example Dataset** in the sidebar OR paste your own data.
-            2.  Enter the **Reservoir Parameters** (pay thickness, porosity, etc.).
-            3.  Click **Run Analysis**.
-            
-            The tool will automatically detect the straight line, calculate permeability/skin, and generate a professional report.
-            """)
+                submitted = st.form_submit_button("🚀 Run Analysis", use_container_width=True)
+
+        if submitted:
+            with st.spinner("🔍 Analyzing pressure data..."):
+                st.session_state.input_params = {
+                    'h': h, 'Qo': Qo, 'mu_o': mu_o, 'Bo': Bo, 'rw': rw,
+                    'phi': phi, 'Ct': Ct, 'pwf_final': pwf_final, 'tp': tp, 'dt_unit': dt_unit
+                }
+                results, figure, dataframe, mtr_info, fig_residuals, validation_warnings = perform_analysis(
+                    h, Qo, mu_o, Bo, rw, phi, Ct, pwf_final, tp, data_text,
+                    dt_unit, m_override, pi_override, k_override, S_override, mtr_sensitivity
+                )
+                st.session_state.results = results
+                st.session_state.figure = figure
+                st.session_state.figure_residuals = fig_residuals
+                st.session_state.dataframe = dataframe
+                st.session_state.mtr_info = mtr_info
+                st.session_state.validation_warnings = validation_warnings
+
+        if st.session_state.validation_warnings:
+            with st.expander("⚠️ Data Quality Warnings", expanded=True):
+                for warning in st.session_state.validation_warnings: st.markdown(f"- {warning}")
+
+        # --- MAIN CONTENT ---
+        if st.session_state.results:
+            # Use Full Width Container for everything now
+
+            st.markdown("### 📈 Analysis Results")
+            results = st.session_state.results
+            mtr_info = st.session_state.mtr_info
+
+            # SINGLE COLUMN METRICS (As requested)
+            # We use a white container and list them clearly
+            st.markdown('<div class="result-container">', unsafe_allow_html=True)
+
+            # To make it a "column" but still look good, we can use st.columns(1) effectively
+            # or just list them. But standard st.metric in one column takes a lot of vertical space.
+            # The user asked for "make this a coloume". This usually means vertical stacking.
+
+            st.metric("Slope 'm'", format_metric(results['m'], "psi/cycle", ":.2f"), help="Horner semi-log slope")
+            st.metric("Initial Pressure (p*)", format_metric(results['pi'], "psi", ":.1f"), help="Extrapolated pressure at infinite shut-in time")
+
+            if results['k'] is not None: st.metric("Permeability (k)", format_metric(results['k'], "md", ":.2f"))
+            if results['kh_calc'] is not None: st.metric("Flow Capacity (kh)", format_metric(results['kh_calc'], "md-ft", ":.1f"))
+
+            if results['transmissibility_calc'] is not None:
+                st.metric("Transmissibility", format_metric(results['transmissibility_calc'], "md-ft/cp", ":.1f"))
+
+            st.metric("Skin Factor (S)", format_metric(results['S'], "", ":.2f"))
+            st.metric("Flow Efficiency (FE)", format_metric(results['FE'], "", ":.3f"))
+            st.metric("Damage Ratio (DR)", format_metric(results['DR'], "", ":.3f"))
+            st.metric("Productivity Index (PI)", format_metric(results['PI'], "bbl/d/psi", ":.3f"))
+            st.metric("Radius of Inv. (ri)", format_metric(results['ri'], "ft", ":.1f"))
+
+            r2_display = f"{results['r_squared']:.4f}" if results['r_squared'] is not None else "N/A"
+            st.metric("Fit Quality (R²)", r2_display)
+
+            st.markdown('</div>', unsafe_allow_html=True)
+
+            if mtr_info:
+                r2_info = st.session_state.mtr_r2_used
+                st.info(f"**Auto-MTR:** {mtr_info['num_points']} points used. Range: {mtr_info['end_dt_orig']:.2f} to {mtr_info['start_dt_orig']:.2f} {st.session_state.input_params.get('dt_unit', 'min')}")
+            elif m_override > 0:
+                st.info(f"**Manual Override:** Analysis forced with m = {m_override}")
+
+            st.subheader("📋 Interpretation")
+            if results['S'] is not None:
+                if results['S'] < -3: skin_interp, color = "✅ Highly stimulated well (Excellent)", "success"
+                elif results['S'] < 0: skin_interp, color = "✅ Stimulated well (Good)", "success"
+                elif results['S'] < 3: skin_interp, color = "✅ Undamaged well (Normal)", "info"
+                elif results['S'] < 10: skin_interp, color = "⚠️ Damaged well (Moderate)", "warning"
+                else: skin_interp, color = "❌ Severely damaged well (High)", "error"
+
+                msg = f"**Skin Factor ({results['S']:.2f}):** {skin_interp}"
+                if color == "success": st.success(msg)
+                elif color == "warning": st.warning(msg)
+                elif color == "error": st.error(msg)
+                else: st.info(msg)
+
+            st.markdown("---")
+            st.subheader("📥 Export Reports")
+            if st.session_state.input_params:
+                # Text Report
+                report_text = export_results_to_txt(results, mtr_info, st.session_state.input_params)
+                b64_report = base64.b64encode(report_text.encode()).decode()
+                href_report = f'<a href="data:text/plain;base64,{b64_report}" download="DST_Report_{datetime.now().strftime("%Y%m%d_%H%M%S")}.txt" style="text-decoration:none; background-color:#f0f2f6; padding:8px; border-radius:5px; display:block; text-align:center; margin-bottom:10px;">📄 Download Text Report</a>'
+                st.markdown(href_report, unsafe_allow_html=True)
+
+                # Excel Report
+                excel_data = generate_excel_download(results, mtr_info, st.session_state.input_params, st.session_state.dataframe)
+                if excel_data:
+                    b64_excel = base64.b64encode(excel_data).decode()
+                    href_excel = f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64_excel}" download="DST_Analysis_{datetime.now().strftime("%Y%m%d")}.xlsx" style="text-decoration:none; background-color:#28a745; color:white; padding:8px; border-radius:5px; display:block; text-align:center;">📊 Download Excel Report</a>'
+                    st.markdown(href_excel, unsafe_allow_html=True)
+
+                with st.expander("📋 Quick Copy"):
+                    copy_to_clipboard_button(report_text, "Copy Report")
+
+            # --- FULL WIDTH PLOTS BELOW RESULTS ---
+            st.markdown("---")
+            st.markdown("### 📊 Analysis Plots")
+            tab1, tab2, tab3, tab4, tab5 = st.tabs(["📊 Horner Plot", "📉 Residuals", "📥 Data Table", "⚙️ Methodology", "🧪 Formulas"])
+
+            with tab1:
+                if st.session_state.figure:
+                    st.pyplot(st.session_state.figure, dpi=300)
+                    st.markdown(get_plot_download_link(st.session_state.figure, "Horner_Plot.png"), unsafe_allow_html=True)
+
+            with tab2:
+                if st.session_state.figure_residuals:
+                    st.pyplot(st.session_state.figure_residuals, dpi=300)
+                    st.markdown(get_plot_download_link(st.session_state.figure_residuals, "Residuals_Plot.png"), unsafe_allow_html=True)
+                    st.info("Residuals show the deviation of data points from the straight-line fit. Random scatter indicates a good fit.")
+
+            with tab3:
+                if st.session_state.dataframe is not None:
+                    st.subheader("Processed Data")
+                    df = st.session_state.dataframe.copy()
+                    mtr_rows = st.session_state.mtr_info['used_rows'] if st.session_state.mtr_info else []
+                    df['MTR'] = ["✅" if i in df.index and mtr_rows and i in mtr_rows else "" for i in df.index]
+                    cols = ['dt', 'pwsf', 'horner_time', 'log_horner_time', 'predicted_pwsf', 'residual', 'MTR']
+                    df_display = df[[c for c in cols if c in df.columns]]
+                    st.dataframe(df_display.style.format({'dt':'{:.2f}','pwsf':'{:.1f}','horner_time':'{:.2f}','log_horner_time':'{:.3f}','predicted_pwsf':'{:.1f}','residual':'{:.2f}'}), use_container_width=True)
+                    st.markdown(get_table_download_link(df), unsafe_allow_html=True)
+
+            with tab4:
+                st.markdown("""
+                ### Analysis Methodology
+                
+                **1. Horner Time**
+                The analysis uses the superposition time function (Horner time) to linearize the pressure buildup equation:
+                $HT = (t_p + \Delta t) / \Delta t$
+                
+                **2. Smart MTR Detection**
+                This application uses an advanced algorithm to identify the **Middle Time Region (MTR)**—the straight-line portion of the semi-log plot representing infinite-acting radial flow.
+                * **Scanning:** Iterates through all valid sub-segments of the data.
+                * **Criteria:** Looks for the *longest* continuous segment with a linearity coefficient ($R^2$) > 0.995.
+                * **Fallback:** If data is noisy, it gracefully degrades to finding the best available statistical fit.
+                
+                **3. Parameter Estimation**
+                * **Permeability (k):** Calculated from the slope ($m$) of the MTR.
+                * **Skin (S):** Calculated using the intercept ($p_{1hr}$) at Horner Time = 1.
+                """)
+
+            with tab5:
+                st.subheader("Key Formulas")
+                st.markdown("**Slope (m):**")
+                st.latex(r"m = \frac{p_{ws_2} - p_{ws_1}}{\log(HT_2) - \log(HT_1)}")
+                st.markdown("**Horner Equation:**")
+                st.latex(r"p_{ws} = p_i - m \log\left(\frac{t_p + \Delta t}{\Delta t}\right)")
+                st.markdown("**Permeability (k):**")
+                st.latex(r"k = \frac{162.6 \cdot Q_o \cdot \mu_o \cdot B_o}{m \cdot h}")
+                st.markdown("**Skin Factor (S):**")
+                st.latex(r"S = 1.151 \left[ \left(\frac{p_i - p_{wf}}{m}\right) - \log\left(\frac{k \cdot t_{p(hr)}}{\phi \cdot \mu_o \cdot C_t \cdot r_w^2}\right) + 3.23 \right]")
+                st.markdown("**Pressure Drop (Skin):**")
+                st.latex(r"\Delta P_{skin} = \frac{141.2 \cdot Q_o \cdot \mu_o \cdot B_o}{k \cdot h} \cdot S")
+                st.markdown("**Flow Efficiency (FE):**")
+                st.latex(r"FE = \frac{p_i - p_{wf} - \Delta p_{skin}}{p_i - p_{wf}}")
+                st.markdown("**Damage Ratio (DR):**")
+                st.latex(r"DR = \frac{1}{FE} = \frac{p_i - p_{wf}}{p_i - p_{wf} - \Delta p_{skin}}")
+                st.markdown("**Productivity Index (PI):**")
+                st.latex(r"PI = \frac{Q_o}{p_i - p_{wf}}")
+                st.markdown("**Radius of Investigation (ri):**")
+                st.latex(r"r_i = \sqrt{\frac{k \cdot t_p}{57600 \cdot \phi \cdot \mu_o \cdot C_t}}")
+        else:
+            # Empty state
+            st.info("👈 Please load data and click **Run Analysis** in the sidebar to begin.")
+
+            # Show a placeholder image or guide
+            col1, col2, col3 = st.columns([1, 2, 1])
+            with col2:
+                st.markdown("""
+                ### Welcome to DST Horner Analyst
+                
+                This tool helps you interpret pressure buildup tests quickly and accurately.
+                
+                **Getting Started:**
+                1.  Select an **Example Dataset** in the sidebar OR paste your own data.
+                2.  Enter the **Reservoir Parameters** (pay thickness, porosity, etc.).
+                3.  Click **Run Analysis**.
+                
+                The tool will automatically detect the straight line, calculate permeability/skin, and generate a professional report.
+                """)
+
+    except Exception as e:
+        st.error(f"An unexpected error occurred: {str(e)}")
+        st.info("Please check your input data and try again.")
 
 if __name__ == "__main__":
     main()
