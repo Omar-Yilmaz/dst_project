@@ -1,7 +1,7 @@
 """
 Enhanced Interactive DST Horner Plot Analyst (Smart Auto MTR Detection)
 Professional web application for Drill Stem Test analysis
-V10.0 - Enhanced with exports, validation, and better UX
+V10.4 - Complete Restoration with Correct Header (No Icon, a.jpg Right)
 """
 
 import streamlit as st
@@ -22,126 +22,6 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# --- Custom CSS for better styling ---
-st.markdown("""
-<style>
-    /* Import fonts */
-    @import url('https://fonts.googleapis.com/css2?family=Segoe+UI:wght@400;600;700&display=swap');
-
-    /* Header Card Styling - Force Light Theme for Header only */
-    .header-card {
-        background-color: #ffffff;
-        padding: 1.5rem;
-        border-radius: 10px;
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-        margin-bottom: 2rem;
-        border: 1px solid #e0e0e0;
-    }
-    
-    .header-card h1 {
-        color: #1F4E78 !important;
-        font-family: 'Segoe UI', sans-serif;
-        font-weight: 700;
-        text-align: center;
-        margin-top: 0;
-        margin-bottom: 0.5rem;
-        font-size: 2.2rem;
-    }
-    
-    .header-card p {
-        color: #2c3e50 !important;
-        font-family: 'Segoe UI', sans-serif;
-        text-align: center;
-        margin: 0;
-    }
-
-    .uni-title {
-        font-size: 1.2rem;
-        font-weight: 700;
-        color: #1F4E78 !important;
-    }
-    
-    .dept-title {
-        font-size: 1rem;
-        color: #5D6D7E !important;
-        margin-bottom: 1rem !important;
-        font-weight: 600;
-    }
-
-    /* Developer Banner */
-    .dev-banner {
-        background-color: #f8f9fa;
-        color: #7f8c8d;
-        padding: 10px;
-        text-align: center;
-        font-size: 0.9rem;
-        font-style: italic;
-        border-radius: 8px;
-        margin-bottom: 1.5rem;
-        border: 1px solid #e9ecef;
-        font-family: 'Segoe UI', sans-serif;
-    }
-    
-    /* Dark mode adjustment for banner text */
-    @media (prefers-color-scheme: dark) {
-        .dev-banner {
-            background-color: #262730;
-            border-color: #464b5d;
-            color: #a6a6a6;
-        }
-    }
-
-    /* Result Boxes - Forced White Background for Visibility */
-    .result-container {
-        background-color: #ffffff !important; /* Force white bg */
-        padding: 1.5rem;
-        border-radius: 8px;
-        border-left: 5px solid #1F4E78;
-        margin: 1rem 0;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-    }
-    
-    /* Metric Styling - Specificity increased to override Streamlit defaults */
-    div[data-testid="stMetricValue"] {
-        font-weight: 700;
-        color: #1F4E78 !important; /* Force dark blue text */
-        font-family: 'Segoe UI', sans-serif;
-    }
-    
-    div[data-testid="stMetricLabel"] {
-        font-weight: 600;
-        color: #5D6D7E !important; /* Force grey text for labels */
-        font-family: 'Segoe UI', sans-serif;
-    }
-    
-    /* Ensure metric container inside our white box behaves well */
-    .result-container [data-testid="stMetric"] {
-        background-color: transparent !important;
-    }
-
-    /* Tab styling */
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 8px;
-    }
-    
-    .stTabs [data-baseweb="tab"] {
-        height: 3rem;
-        white-space: pre-wrap;
-        border-radius: 4px 4px 0 0;
-        padding-left: 1rem;
-        padding-right: 1rem;
-        font-weight: 600;
-    }
-    
-    /* Success/Warning/Error Box Styling Enhancements */
-    .stAlert {
-        border-radius: 8px;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-    }
-    
-</style>
-""", unsafe_allow_html=True)
-
 # --- Helper: Robust Image Finder ---
 def find_image_path(keywords):
     """
@@ -150,6 +30,11 @@ def find_image_path(keywords):
     """
     try:
         files = os.listdir('.')
+        # Priority check for exact matches first
+        for k in keywords:
+            if k in files: return k
+
+        # Fuzzy search
         for f in files:
             if f.lower().endswith(('.png', '.jpg', '.jpeg')):
                 for k in keywords:
@@ -164,7 +49,7 @@ def validate_pressure_data(df):
     """Validate pressure buildup data for physical consistency"""
     warnings = []
     if len(df) < 2: return warnings
-    
+
     pressure_diff = df['pwsf'].diff()
     decreasing_points = (pressure_diff < -5).sum()
 
@@ -176,12 +61,12 @@ def validate_pressure_data(df):
         warnings.append("⚠️ Extremely high pressures detected (>20,000 psi). Verify data.")
     if df['dt'].duplicated().any():
         warnings.append("⚠️ Duplicate time points detected. Consider averaging or removing.")
-    
+
     if len(df) > 1:
         time_ratios = df['dt'].iloc[1:].values / df['dt'].iloc[:-1].values
         if (time_ratios > 10).any():
             warnings.append("⚠️ Large gaps in time spacing detected. May affect MTR detection.")
-            
+
     return warnings
 
 def check_parameter_consistency(h, Qo, mu_o, Bo, phi, Ct, rw, pwf_final, pi):
@@ -200,12 +85,12 @@ def export_results_to_txt(results, mtr_info, input_params):
     """Generate a formatted text report"""
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     r2_text = f"{results['r_squared']:.4f}" if results['r_squared'] is not None else "N/A"
-    
+
     # Format optional results
     k_text = f"{results['k']:.2f} md" if results['k'] else "Not calculated"
     kh_text = f"{results['kh_calc']:.1f} md-ft" if results['kh_calc'] else "Not calculated"
     t_text = f"{results['transmissibility_calc']:.1f} md-ft/cp" if results['transmissibility_calc'] else "Not calculated"
-    
+
     # Handle None values safely
     def safe_fmt(val, fmt="{:.2f}"):
         return fmt.format(val) if val is not None else "N/A"
@@ -259,28 +144,28 @@ Time Range:                 {mtr_info['start_dt_orig']:.2f} to {mtr_info['end_dt
 def generate_excel_download(results, mtr_info, input_params, df):
     """Generate an Excel file with parameters and results"""
     output = io.BytesIO()
-    
+
     # Create DataFrames for Parameters and Results
     param_data = {k: [v] for k, v in input_params.items()}
     param_df = pd.DataFrame(param_data).T.reset_index()
     param_df.columns = ['Parameter', 'Value']
-    
+
     res_data = {k: [v] for k, v in results.items()}
     res_df = pd.DataFrame(res_data).T.reset_index()
     res_df.columns = ['Metric', 'Value']
-    
+
     try:
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
             # Write sheets
             res_df.to_excel(writer, sheet_name='Results Summary', index=False)
             param_df.to_excel(writer, sheet_name='Input Parameters', index=False)
-            
+
             # Process main data
             df_out = df.copy()
             if 'dt_calc' in df_out.columns:
                 df_out = df_out.drop(columns=['dt_calc'])
             df_out.to_excel(writer, sheet_name='Pressure Data', index=False)
-            
+
         return output.getvalue()
     except Exception as e:
         return None
@@ -314,7 +199,7 @@ def find_best_mtr(df, min_points=3, min_r_squared_threshold=0.995):
                 regression = linregress(fit_df_loop['log_horner_time'].values, fit_df_loop['pwsf'].values)
                 if not np.isfinite(regression.slope): continue
                 r_squared = regression.rvalue ** 2
-                
+
                 if r_squared >= min_r_squared_threshold:
                     if num_points_in_loop > best_num_points:
                         best_num_points = num_points_in_loop
@@ -339,11 +224,11 @@ def find_best_mtr(df, min_points=3, min_r_squared_threshold=0.995):
                     regression = linregress(fit_df_loop['log_horner_time'].values, fit_df_loop['pwsf'].values)
                     if not np.isfinite(regression.slope): continue
                     r_squared = regression.rvalue ** 2
-                    
+
                     # Score prioritizes length but penalizes bad fit
-                    score = num_points_in_loop * (r_squared**2) 
+                    score = num_points_in_loop * (r_squared**2)
                     current_best_score = best_num_points * (best_r_squared**2)
-                    
+
                     if score > current_best_score:
                         best_num_points = num_points_in_loop
                         best_regression = regression
@@ -535,43 +420,43 @@ def perform_analysis(h, Qo, mu_o, Bo, rw, phi, Ct, pwf_final, tp, data_text, dt_
     # --- Plots with improved style ---
     # Use a style context that mimics the requested 'whitegrid' look
     with plt.style.context('seaborn-v0_8-whitegrid'):
-        
+
         # Horner Plot
         fig_horner, ax = plt.subplots(figsize=(12, 8)) # Increased size
-        
+
         # Plot Data
         ax.scatter(df['horner_time'], df['pwsf'], s=90, color='#3498db', edgecolor='white', linewidths=0.8, label='All Data', zorder=5, alpha=0.8)
-        
+
         if fit_df is not None and mtr_info is not None:
             ax.scatter(fit_df['horner_time'], fit_df['pwsf'], s=120, color='#e74c3c', edgecolor='white', linewidths=1.0, label=f"MTR (n={mtr_info['num_points']})", zorder=6)
-        
+
         ax.set_xscale('log')
         ax.invert_xaxis()
-        
+
         # Axis Limits
         min_ht_plot = 1.0
         max_ht_plot = df['horner_time'].max()
         ax.set_xlim(left=max_ht_plot * 1.5, right=min_ht_plot * 0.9)
-        
+
         min_y_plot = df['pwsf'].min()
         max_y_plot = max(df['pwsf'].max(), pi)
         y_padding = max((max_y_plot - min_y_plot) * 0.10, 20.0)
         ax.set_ylim(bottom=min_y_plot - y_padding, top=max_y_plot + y_padding)
-        
+
         # Regression Line
         x_line_log = np.array([np.log10(max_ht_plot * 1.5), 0])
         y_line = pi + m_slope * x_line_log
         label_r2 = f"R² = {r_squared:.3f}" if r_squared is not None else "R² = N/A"
-        
+
         # Annotate the equation of the line
         eq_text = f"Pws = {pi:.1f} - {m_abs:.2f} log(HT)"
         ax.text(0.05, 0.95, eq_text, transform=ax.transAxes, fontsize=12, verticalalignment='top', bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
 
         ax.plot(10 ** x_line_log, y_line, color='#2c3e50', label=f'Regression Line', zorder=4, linewidth=2.5, alpha=0.8)
-        
+
         # Highlight Pi (Initial Pressure) line only, as requested
         ax.axhline(pi, color='#2ecc71', linestyle='--', label=f'Extrapolated Pi = {pi:.1f} psi', linewidth=2.0, zorder=4)
-        
+
         # Styling
         ax.set_xlabel('Horner Time $(t_p + \Delta t) / \Delta t$', fontsize=13, fontweight='bold')
         ax.set_ylabel('Pressure (psi)', fontsize=13, fontweight='bold')
@@ -584,23 +469,23 @@ def perform_analysis(h, Qo, mu_o, Bo, rw, phi, Ct, pwf_final, tp, data_text, dt_
 
         # Residuals Plot
         fig_residuals, ax_res = plt.subplots(figsize=(12, 5)) # Increased size
-        
+
         ax_res.scatter(df['horner_time'], df['residual'], s=70, color='#3498db', edgecolor='white', linewidths=0.5, label='Residuals', zorder=5, alpha=0.7)
-        
+
         if fit_df is not None and mtr_info is not None:
             mtr_df_res = df.loc[mtr_info['used_rows']]
             ax_res.scatter(mtr_df_res['horner_time'], mtr_df_res['residual'], s=100, color='#e74c3c', edgecolor='white', linewidths=1.0, label='MTR Points', zorder=6)
-        
+
         ax_res.axhline(0, color='#2c3e50', linestyle='--', linewidth=1.5, alpha=0.8)
         ax_res.set_xscale('log')
         ax_res.invert_xaxis()
         ax_res.set_xlim(left=max_ht_plot * 1.1, right=min_ht_plot * 0.9)
-        
+
         max_abs_residual = df['residual'].abs().max()
         if not np.isfinite(max_abs_residual) or max_abs_residual == 0: max_abs_residual = 1.0
         res_padding = max(max_abs_residual * 0.15, 5.0)
         ax_res.set_ylim(-max_abs_residual - res_padding, max_abs_residual + res_padding)
-        
+
         ax_res.set_xlabel('Horner Time', fontsize=12, fontweight='bold')
         ax_res.set_ylabel('Residual (psi)', fontsize=12, fontweight='bold')
         ax_res.set_title('Regression Residuals', fontsize=13, fontweight='bold')
@@ -632,50 +517,151 @@ def format_metric(value, unit, format_str=":.2f"):
 # --- Main Application ---
 def main():
     try:
-        # --- HEADER SECTION ---
-        # Render header inside a container div with forced light styling for robustness
-        st.markdown('<div class="header-card">', unsafe_allow_html=True)
-        
-        # Update layout to accommodate the new image 'a.jpg'
-        # Structure: Eng Logo | Anniversary Logo (a.jpg) | Title Text | Other Logo (Yom)
-        c1, c2, c3, c4 = st.columns([1, 1, 4, 1])
+        # ---------------------------------------------------------
+        # 🛠️ HEADER CONFIGURATION - EDIT EVERYTHING HERE 🛠️
+        # ---------------------------------------------------------
+        CONFIG = {
+            # --- Text Content ---
+            "TITLE": "DST Horner Plot Analyst",
+            # Subtitle split into two lines for cleaner visual matching the image
+            "SUBTITLE_LINE1": "University of Kirkuk | College of Engineering",
+            "SUBTITLE_LINE2": "Petroleum Engineering Department",
+
+            "DEVELOPERS": "Developed by: Bilal Rabah & Omar Yilmaz",
+            "SUPERVISOR": "Supervised by: Lec. Mohammed Yashar",
+            "DATE": "Date: November 2025",
+            "ICON": None, # ICON REMOVED COMPLETELY - CLEAN TEXT ONLY
+
+            # --- Visual Colors (Hex Codes) ---
+            "BG_GRADIENT_1": "#1F4E78",      # Dark Blue
+            "BG_GRADIENT_2": "#2c5f8d",      # Lighter Blue
+            "TEXT_COLOR": "#ffffff",         # White
+
+            # --- Image Paths ---
+            "LEFT_LOGO_QUERY": ['eng', 'logo', 'triangle'],
+            "RIGHT_LOGO_QUERY": ['anniversary', '22', 'right', 'a.png']
+        }
+        # ---------------------------------------------------------
+
+        # --- DYNAMIC CSS INJECTION ---
+        st.markdown(f"""
+        <style>
+            @import url('https://fonts.googleapis.com/css2?family=Segoe+UI:wght@400;600;700&display=swap');
+
+            /* Main Blue Header Card */
+            .blue-header-card {{
+                background: linear-gradient(135deg, {CONFIG['BG_GRADIENT_1']} 0%, {CONFIG['BG_GRADIENT_2']} 100%);
+                padding: 2rem;
+                border-radius: 15px;
+                box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+                text-align: center;
+                color: {CONFIG['TEXT_COLOR']};
+                margin-bottom: 2rem;
+            }}
+            
+            /* REMOVED header-icon STYLE */
+            
+            .header-title {{
+                font-family: 'Segoe UI', sans-serif;
+                font-size: 2.2rem;
+                font-weight: 800;
+                margin: 0;
+                color: {CONFIG['TEXT_COLOR']};
+                text-shadow: 0px 2px 4px rgba(0,0,0,0.2);
+            }}
+            
+            .header-subtitle {{
+                font-family: 'Segoe UI', sans-serif;
+                font-size: 1.1rem;
+                font-weight: 500;
+                margin-top: 0.5rem;
+                color: #e0e0e0;
+                line-height: 1.4;
+            }}
+            
+            .header-dev {{
+                font-family: 'Segoe UI', sans-serif;
+                font-size: 0.85rem;
+                font-style: italic;
+                margin-top: 1rem;
+                color: #b0c4de;
+                border-top: 1px solid rgba(255,255,255,0.2);
+                padding-top: 0.5rem;
+            }}
+            
+            /* Result Boxes */
+            .result-container {{
+                background-color: #ffffff !important;
+                padding: 1.5rem;
+                border-radius: 8px;
+                border-left: 5px solid {CONFIG['BG_GRADIENT_1']};
+                margin: 1rem 0;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            }}
+            
+            /* Metric Styling */
+            div[data-testid="stMetricValue"] {{
+                font-weight: 700;
+                color: {CONFIG['BG_GRADIENT_1']} !important;
+                font-family: 'Segoe UI', sans-serif;
+            }}
+            
+            div[data-testid="stMetricLabel"] {{
+                font-weight: 600;
+                color: #5D6D7E !important;
+                font-family: 'Segoe UI', sans-serif;
+            }}
+            
+            /* Tab styling */
+            .stTabs [data-baseweb="tab-list"] {{
+                gap: 8px;
+            }}
+            
+            .stTabs [data-baseweb="tab"] {{
+                height: 3rem;
+                white-space: pre-wrap;
+                border-radius: 4px 4px 0 0;
+                padding-left: 1rem;
+                padding-right: 1rem;
+                font-weight: 600;
+            }}
+            
+            div[data-testid="stImage"] {{
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                height: 100%;
+            }}
+        </style>
+        """, unsafe_allow_html=True)
+
+        # --- HEADER SECTION (Dynamic with Config) ---
+        c1, c2, c3 = st.columns([1, 3, 1])
 
         with c1:
-            eng_path = find_image_path(['eng'])
-            if eng_path:
-                st.image(eng_path, use_container_width=True)
+            eng_path = find_image_path(CONFIG['LEFT_LOGO_QUERY'])
+            if eng_path: st.image(eng_path, use_container_width=True)
 
         with c2:
-            # Explicitly look for 'a.jpg' or 'a.png' as requested
-            if os.path.exists("a.jpg"):
-                st.image("a.jpg", use_container_width=True)
-            elif os.path.exists("a.png"):
-                st.image("a.png", use_container_width=True)
-            else:
-                # Fallback search if exact name differs but keyword matches
-                a_path = find_image_path(['anniversary', '22'])
-                if a_path:
-                     st.image(a_path, use_container_width=True)
+            # CLEAN HEADER WITHOUT ICON
+            st.markdown(f"""
+                <div class="blue-header-card">
+                    <div class="header-title">{CONFIG['TITLE']}</div>
+                    <div class="header-subtitle">
+                        {CONFIG['SUBTITLE_LINE1']}<br>
+                        {CONFIG['SUBTITLE_LINE2']}
+                    </div>
+                    <div class="header-dev">
+                        {CONFIG['DEVELOPERS']} | {CONFIG['SUPERVISOR']}<br>
+                        {CONFIG['DATE']}
+                    </div>
+                </div>
+            """, unsafe_allow_html=True)
 
         with c3:
-            st.markdown('<p class="uni-title">University of Kirkuk | College of Engineering</p>', unsafe_allow_html=True)
-            st.markdown('<p class="dept-title">Petroleum Engineering Department</p>', unsafe_allow_html=True)
-            st.markdown('<h1>DST Horner Plot Analyst</h1>', unsafe_allow_html=True)
-
-        with c4:
-            logo_path = find_image_path(['جامعة', 'bank', 'logo', 'day', 'يوم'])
-            if logo_path:
-                st.image(logo_path, use_container_width=True)
-                
-        st.markdown('</div>', unsafe_allow_html=True)
-
-        # --- DEVELOPER BANNER ---
-        st.markdown(
-            '<div class="dev-banner">'
-            'Developed by: Bilal Rabah & Omar Yilmaz  |  Supervised by: Lec. Mohammed Yashar'
-            '</div>',
-            unsafe_allow_html=True
-        )
+            # Explicitly use the correct keyword or file for the right logo
+            a_path = find_image_path(CONFIG['RIGHT_LOGO_QUERY'])
+            if a_path: st.image(a_path, use_container_width=True)
 
         # --- Initialize session state ---
         if 'results' not in st.session_state: st.session_state.results = None
@@ -690,7 +676,7 @@ def main():
         # --- SIDEBAR INPUTS ---
         with st.sidebar:
             st.title("⚙️ Configuration")
-            
+
             with st.expander("📄 About & Help", expanded=False):
                 st.markdown("""
                 **DST Horner Analyst**
@@ -704,10 +690,10 @@ def main():
                 
                 **Authors:** Bilal Rabah & Omar Yilmaz
                 """)
-            
+
             st.markdown("---")
             st.header("1. Data Input")
-            
+
             example_choice = st.selectbox(
                 "Load Example Dataset",
                 ["None", "Typical Well", "Damaged Well", "Stimulated Well"],
@@ -730,10 +716,10 @@ def main():
             with st.form(key='input_form'):
                 dt_unit = st.radio("Time Unit for Δt", ("minutes", "hours"), horizontal=True)
                 data_text = st.text_area("Shut-in Data (Δt, Pwsf)", value=default_data, height=150, help="Paste data here. Format: Time, Pressure")
-                
+
                 st.markdown("---")
                 st.header("2. Reservoir Parameters")
-                
+
                 col1, col2 = st.columns(2)
                 with col1:
                     h = st.number_input("h (ft)", value=default_h, format="%.2f", help="Pay Thickness")
@@ -749,7 +735,7 @@ def main():
                 st.markdown("---")
                 st.header("3. Test Settings")
                 tp = st.number_input("Producing Time tp (min)", value=60.0, format="%.1f")
-                
+
                 with st.expander("Advanced Settings"):
                     mtr_sensitivity = st.slider("MTR Detection Sensitivity", 0.950, 1.000, 0.995, 0.001, format="%.3f", help="Higher values require straighter lines")
                     m_override = st.number_input("Override Slope (m)", value=0.0, format="%.2f")
@@ -783,26 +769,26 @@ def main():
         # --- MAIN CONTENT ---
         if st.session_state.results:
             # Use Full Width Container for everything now
-            
+
             st.markdown("### 📈 Analysis Results")
             results = st.session_state.results
             mtr_info = st.session_state.mtr_info
-            
+
             # SINGLE COLUMN METRICS (As requested)
             # We use a white container and list them clearly
             st.markdown('<div class="result-container">', unsafe_allow_html=True)
-            
+
             # To make it a "column" but still look good, we can use st.columns(1) effectively
             # or just list them. But standard st.metric in one column takes a lot of vertical space.
             # The user asked for "make this a coloume". This usually means vertical stacking.
-            
+
             st.metric("Slope 'm'", format_metric(results['m'], "psi/cycle", ":.2f"), help="Horner semi-log slope")
             st.metric("Initial Pressure (p*)", format_metric(results['pi'], "psi", ":.1f"), help="Extrapolated pressure at infinite shut-in time")
-            
+
             if results['k'] is not None: st.metric("Permeability (k)", format_metric(results['k'], "md", ":.2f"))
             if results['kh_calc'] is not None: st.metric("Flow Capacity (kh)", format_metric(results['kh_calc'], "md-ft", ":.1f"))
-            
-            if results['transmissibility_calc'] is not None: 
+
+            if results['transmissibility_calc'] is not None:
                 st.metric("Transmissibility", format_metric(results['transmissibility_calc'], "md-ft/cp", ":.1f"))
 
             st.metric("Skin Factor (S)", format_metric(results['S'], "", ":.2f"))
@@ -810,10 +796,10 @@ def main():
             st.metric("Damage Ratio (DR)", format_metric(results['DR'], "", ":.3f"))
             st.metric("Productivity Index (PI)", format_metric(results['PI'], "bbl/d/psi", ":.3f"))
             st.metric("Radius of Inv. (ri)", format_metric(results['ri'], "ft", ":.1f"))
-            
+
             r2_display = f"{results['r_squared']:.4f}" if results['r_squared'] is not None else "N/A"
             st.metric("Fit Quality (R²)", r2_display)
-                
+
             st.markdown('</div>', unsafe_allow_html=True)
 
             if mtr_info:
@@ -829,7 +815,7 @@ def main():
                 elif results['S'] < 3: skin_interp, color = "✅ Undamaged well (Normal)", "info"
                 elif results['S'] < 10: skin_interp, color = "⚠️ Damaged well (Moderate)", "warning"
                 else: skin_interp, color = "❌ Severely damaged well (High)", "error"
-                
+
                 msg = f"**Skin Factor ({results['S']:.2f}):** {skin_interp}"
                 if color == "success": st.success(msg)
                 elif color == "warning": st.warning(msg)
@@ -844,14 +830,14 @@ def main():
                 b64_report = base64.b64encode(report_text.encode()).decode()
                 href_report = f'<a href="data:text/plain;base64,{b64_report}" download="DST_Report_{datetime.now().strftime("%Y%m%d_%H%M%S")}.txt" style="text-decoration:none; background-color:#f0f2f6; padding:8px; border-radius:5px; display:block; text-align:center; margin-bottom:10px;">📄 Download Text Report</a>'
                 st.markdown(href_report, unsafe_allow_html=True)
-                
+
                 # Excel Report
                 excel_data = generate_excel_download(results, mtr_info, st.session_state.input_params, st.session_state.dataframe)
                 if excel_data:
                     b64_excel = base64.b64encode(excel_data).decode()
                     href_excel = f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64_excel}" download="DST_Analysis_{datetime.now().strftime("%Y%m%d")}.xlsx" style="text-decoration:none; background-color:#28a745; color:white; padding:8px; border-radius:5px; display:block; text-align:center;">📊 Download Excel Report</a>'
                     st.markdown(href_excel, unsafe_allow_html=True)
-                
+
                 with st.expander("📋 Quick Copy"):
                     copy_to_clipboard_button(report_text, "Copy Report")
 
@@ -924,7 +910,7 @@ def main():
         else:
             # Empty state
             st.info("👈 Please load data and click **Run Analysis** in the sidebar to begin.")
-            
+
             # Show a placeholder image or guide
             col1, col2, col3 = st.columns([1, 2, 1])
             with col2:
@@ -940,7 +926,7 @@ def main():
                 
                 The tool will automatically detect the straight line, calculate permeability/skin, and generate a professional report.
                 """)
-                
+
     except Exception as e:
         st.error(f"An unexpected error occurred: {str(e)}")
         st.info("Please check your input data and try again.")
