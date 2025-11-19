@@ -528,7 +528,7 @@ def main():
             "SUBTITLE_LINE2": "Petroleum Engineering Department",
 
             "DEVELOPERS": "Developed by: Bilal Rabah & Omar Yilmaz",
-            "SUPERVISOR": "Supervised by: Lec. Mohammed Yashar",
+            "SUPERVISOR": "Supervised by: Lec. Omar Khalaf",
             "DATE": "Date: November 2025",
             "ICON": None, # ICON REMOVED COMPLETELY - CLEAN TEXT ONLY
 
@@ -933,3 +933,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
